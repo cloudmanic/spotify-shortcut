@@ -36,11 +36,23 @@ const (
 	defaultTokenFile   = ".spotify_token.json"
 )
 
+// SpotifyClient defines the interface for Spotify API operations.
+// This allows for mocking in tests.
+type SpotifyClient interface {
+	CurrentUser(ctx context.Context) (*spotify.PrivateUser, error)
+	CurrentUsersPlaylists(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error)
+	PlayerDevices(ctx context.Context) ([]spotify.PlayerDevice, error)
+	GetPlaylist(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error)
+	PlayOpt(ctx context.Context, opts *spotify.PlayOptions) error
+	Pause(ctx context.Context) error
+	Shuffle(ctx context.Context, shuffle bool) error
+}
+
 var (
 	auth           *spotifyauth.Authenticator
 	ch             = make(chan *spotify.Client)
 	state          = "spotify-shortcut-state"
-	spotifyClient  *spotify.Client
+	spotifyClient  SpotifyClient
 	apiAccessToken string
 	tokenFile      string
 )
@@ -829,7 +841,7 @@ func handlePauseRequest(w http.ResponseWriter, r *http.Request) {
 
 // resolvePlaylistIDQuiet resolves a playlist input without printing to stdout.
 // Used by the API server to avoid cluttering logs.
-func resolvePlaylistIDQuiet(ctx context.Context, client *spotify.Client, input string) (string, error) {
+func resolvePlaylistIDQuiet(ctx context.Context, client SpotifyClient, input string) (string, error) {
 	// First, check if it's a URL and extract the ID
 	if strings.Contains(input, "spotify.com/playlist/") {
 		return extractPlaylistID(input), nil
