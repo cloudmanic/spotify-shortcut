@@ -15,9 +15,38 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/zmb3/spotify/v2"
 )
+
+// loggingResponseWriter wraps http.ResponseWriter to capture the status code.
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+// WriteHeader captures the status code before writing it.
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+// loggingMiddleware wraps an http.Handler and logs each request.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Wrap the response writer to capture status code
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Process the request
+		next.ServeHTTP(lrw, r)
+
+		// Log the request
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, lrw.statusCode, time.Since(start))
+	})
+}
 
 // startAPIServer starts the HTTP API server for remote control.
 func startAPIServer() {
@@ -38,7 +67,10 @@ func startAPIServer() {
 	fmt.Println("  GET /api/v1/play?device=<name>&playlist=<name|id|url>&shuffle=<true|false>")
 	fmt.Println("  GET /api/v1/pause")
 
-	err := http.ListenAndServe(":"+port, mux)
+	// Wrap mux with logging middleware
+	handler := loggingMiddleware(mux)
+
+	err := http.ListenAndServe(":"+port, handler)
 	if err != nil {
 		log.Fatalf("Failed to start API server: %v", err)
 	}
