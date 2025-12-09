@@ -37,9 +37,11 @@ const (
 )
 
 var (
-	auth  *spotifyauth.Authenticator
-	ch    = make(chan *spotify.Client)
-	state = "spotify-shortcut-state"
+	auth           *spotifyauth.Authenticator
+	ch             = make(chan *spotify.Client)
+	state          = "spotify-shortcut-state"
+	spotifyClient  *spotify.Client
+	apiAccessToken string
 )
 
 // main is the entry point for the application. It handles authentication,
@@ -52,6 +54,7 @@ func main() {
 	shuffle := flag.Bool("shuffle", false, "Enable shuffle mode and start at random track")
 	deviceFlag := flag.String("device", "", "Device name or ID to play on")
 	playlistFlag := flag.String("playlist", "", "Playlist ID or URL to play")
+	serverMode := flag.Bool("server", false, "Start as HTTP API server")
 	flag.Parse()
 
 	// Load .env file if it exists (ignore error if not found)
@@ -81,9 +84,15 @@ func main() {
 		log.Fatal("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables are required")
 	}
 
-	// Only require playlist ID if not listing devices or playlists
-	if playlistID == "" && !*listDevices && !*listPlaylists {
+	// Only require playlist ID if not listing devices, playlists, or running in server mode
+	if playlistID == "" && !*listDevices && !*listPlaylists && !*serverMode {
 		log.Fatal("SPOTIFY_PLAYLIST_ID is required. Use -playlist flag or set in .env")
+	}
+
+	// Get API access token for server mode
+	apiAccessToken = os.Getenv("API_ACCESS_TOKEN")
+	if *serverMode && apiAccessToken == "" {
+		log.Fatal("API_ACCESS_TOKEN environment variable is required for server mode")
 	}
 
 	// Initialize the authenticator with required scopes
@@ -121,6 +130,15 @@ func main() {
 	}
 
 	fmt.Printf("Authenticated as: %s\n", user.DisplayName)
+
+	// Store client globally for server mode
+	spotifyClient = client
+
+	// If --server flag is set, start HTTP API server
+	if *serverMode {
+		startAPIServer()
+		return
+	}
 
 	// If --playlists flag is set, list playlists and exit
 	if *listPlaylists {
@@ -490,4 +508,218 @@ func printPlaylistsTable(playlists []spotify.SimplePlaylist) {
 
 	fmt.Println()
 	green.Printf("Total playlists: %d\n", len(playlists))
+}
+
+// APIResponse represents a standard JSON response for the API.
+type APIResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// startAPIServer starts the HTTP API server for remote control.
+func startAPIServer() {
+	port := os.Getenv("API_SERVER_PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/play", handlePlayRequest)
+
+	fmt.Printf("Starting API server on port %s...\n", port)
+	fmt.Println("Endpoints:")
+	fmt.Println("  GET /api/v1/play?device=<name>&playlist=<name|id|url>&shuffle=<true|false>")
+
+	err := http.ListenAndServe(":"+port, mux)
+	if err != nil {
+		log.Fatalf("Failed to start API server: %v", err)
+	}
+}
+
+// handlePlayRequest handles the /api/v1/play endpoint to start playlist playback.
+func handlePlayRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Verify access token
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+
+	if token != apiAccessToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Error:   "Invalid or missing access token",
+		})
+		return
+	}
+
+	// Get query parameters
+	deviceName := r.URL.Query().Get("device")
+	playlistInput := r.URL.Query().Get("playlist")
+	shuffleStr := r.URL.Query().Get("shuffle")
+
+	if playlistInput == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Error:   "playlist parameter is required",
+		})
+		return
+	}
+
+	shuffle := strings.ToLower(shuffleStr) == "true"
+
+	// Play the playlist
+	result, err := playPlaylist(deviceName, playlistInput, shuffle)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: result,
+	})
+}
+
+// playPlaylist starts playback of a playlist on the specified device.
+// This function is used by both CLI and API server modes.
+func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error) {
+	ctx := context.Background()
+
+	// Get available devices
+	devices, err := spotifyClient.PlayerDevices(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	if len(devices) == 0 {
+		return "", fmt.Errorf("no Spotify Connect devices found")
+	}
+
+	// Find the target device
+	var targetDevice *spotify.PlayerDevice
+	for i, device := range devices {
+		if deviceName != "" && (device.Name == deviceName || string(device.ID) == deviceName) {
+			targetDevice = &devices[i]
+			break
+		}
+	}
+
+	// If no device specified or not found, use first active or first device
+	if targetDevice == nil {
+		for i, device := range devices {
+			if device.Active {
+				targetDevice = &devices[i]
+				break
+			}
+		}
+		if targetDevice == nil {
+			targetDevice = &devices[0]
+		}
+	}
+
+	// Resolve playlist
+	playlistID, err := resolvePlaylistIDQuiet(ctx, spotifyClient, playlistInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve playlist: %w", err)
+	}
+
+	// Get playlist info
+	playlist, err := spotifyClient.GetPlaylist(ctx, spotify.ID(playlistID))
+	if err != nil {
+		return "", fmt.Errorf("failed to get playlist: %w", err)
+	}
+
+	trackCount := int(playlist.Tracks.Total)
+	playlistURI := spotify.URI("spotify:playlist:" + playlistID)
+
+	// Build play options
+	opts := &spotify.PlayOptions{
+		DeviceID:        &targetDevice.ID,
+		PlaybackContext: &playlistURI,
+	}
+
+	if shuffle {
+		// Pick random starting track
+		randomOffset := rand.Intn(trackCount)
+		opts.PlaybackOffset = &spotify.PlaybackOffset{Position: &randomOffset}
+
+		err = spotifyClient.PlayOpt(ctx, opts)
+		if err != nil {
+			return "", fmt.Errorf("failed to start playback: %w", err)
+		}
+
+		// Wait for playback to initialize before setting shuffle
+		time.Sleep(500 * time.Millisecond)
+
+		// Enable shuffle mode
+		err = spotifyClient.Shuffle(ctx, true)
+		if err != nil {
+			log.Printf("Warning: Failed to enable shuffle: %v", err)
+		}
+
+		return fmt.Sprintf("Now playing \"%s\" on %s (shuffle enabled, starting at track %d of %d)",
+			playlist.Name, targetDevice.Name, randomOffset+1, trackCount), nil
+	}
+
+	// Start from track 1
+	startPosition := 0
+	opts.PlaybackOffset = &spotify.PlaybackOffset{Position: &startPosition}
+
+	err = spotifyClient.PlayOpt(ctx, opts)
+	if err != nil {
+		return "", fmt.Errorf("failed to start playback: %w", err)
+	}
+
+	return fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name), nil
+}
+
+// resolvePlaylistIDQuiet resolves a playlist input without printing to stdout.
+// Used by the API server to avoid cluttering logs.
+func resolvePlaylistIDQuiet(ctx context.Context, client *spotify.Client, input string) (string, error) {
+	// First, check if it's a URL and extract the ID
+	if strings.Contains(input, "spotify.com/playlist/") {
+		return extractPlaylistID(input), nil
+	}
+
+	// Check if it looks like a Spotify ID (22 alphanumeric characters)
+	if len(input) == 22 && !strings.Contains(input, " ") {
+		return input, nil
+	}
+
+	// Search user's playlists by name
+	limit := 50
+	offset := 0
+
+	for {
+		playlists, err := client.CurrentUsersPlaylists(ctx, spotify.Limit(limit), spotify.Offset(offset))
+		if err != nil {
+			return "", fmt.Errorf("failed to get playlists: %w", err)
+		}
+
+		for _, playlist := range playlists.Playlists {
+			if strings.EqualFold(playlist.Name, input) {
+				return string(playlist.ID), nil
+			}
+			if string(playlist.ID) == input {
+				return input, nil
+			}
+		}
+
+		if len(playlists.Playlists) < limit {
+			break
+		}
+		offset += limit
+	}
+
+	// Assume it's an ID
+	return input, nil
 }

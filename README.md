@@ -10,6 +10,7 @@ A command-line tool to quickly play Spotify playlists on Spotify Connect devices
 - List available devices and playlists
 - Persistent OAuth token (authenticate once)
 - Environment variable and command-line flag configuration
+- **HTTP API server mode** for remote control and integrations
 
 ## Prerequisites
 
@@ -57,6 +58,10 @@ SPOTIFY_CLIENT_SECRET=your-client-secret-here
 SPOTIFY_PLAYLIST_ID=your-default-playlist-id
 SPOTIFY_DEVICE_NAME=your-default-device-name
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+
+# API Server mode (required for -server flag)
+API_ACCESS_TOKEN=your-secret-api-token-here
+API_SERVER_PORT=8080
 ```
 
 ## Usage
@@ -124,6 +129,7 @@ On first run, the app will open a URL for Spotify authentication. Visit the URL 
 | `-shuffle` | Enable shuffle mode and start at random track |
 | `-devices` | List available Spotify Connect devices and exit |
 | `-playlists` | List your Spotify playlists and exit |
+| `-server` | Start as HTTP API server |
 | `-debug` | Print raw API responses for debugging |
 
 ## Examples
@@ -140,6 +146,66 @@ On first run, the app will open a URL for Spotify authentication. Visit the URL 
 
 # Play using environment variable defaults (set in .env)
 ./spotify-shortcut
+```
+
+## API Server Mode
+
+Run the application as an HTTP API server for remote control and integrations:
+
+```bash
+./spotify-shortcut -server
+```
+
+The server listens on the port specified by `API_SERVER_PORT` (default: 8080).
+
+### Authentication
+
+All API requests require authentication via the `API_ACCESS_TOKEN`. You can provide the token in two ways:
+
+1. **Query parameter**: `?token=your-secret-token`
+2. **Authorization header**: `Authorization: Bearer your-secret-token`
+
+### Endpoints
+
+#### GET /api/v1/play
+
+Start playback of a playlist.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `token` | Yes* | API access token (*or use Authorization header) |
+| `playlist` | Yes | Playlist name, ID, or URL |
+| `device` | No | Device name or ID (uses first active device if not specified) |
+| `shuffle` | No | `true` or `false` (default: false) |
+
+**Example requests:**
+
+```bash
+# Using query parameter for token
+curl "http://localhost:8080/api/v1/play?token=your-token&playlist=Chill%20Vibes&shuffle=true"
+
+# Using Authorization header
+curl -H "Authorization: Bearer your-token" \
+  "http://localhost:8080/api/v1/play?playlist=Chill%20Vibes&device=Kitchen&shuffle=true"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Now playing \"Chill Vibes\" on Kitchen (shuffle enabled, starting at track 5 of 50)"
+}
+```
+
+**Error response:**
+
+```json
+{
+  "success": false,
+  "error": "Invalid or missing access token"
+}
 ```
 
 ## Automation
