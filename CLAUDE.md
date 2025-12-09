@@ -24,3 +24,13 @@ Replace `YYYY-MM-DD` with the current date and `YYYY` with the current year.
   1. Standard library
   2. Third-party packages
   3. Aliased imports
+
+## Testing
+
+After every code change, run the test suite to ensure no tests broke:
+
+```bash
+go test -v ./...
+```
+
+All tests must pass before committing changes.
