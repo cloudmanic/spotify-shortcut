@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	defaultRedirectURI = "http://127.0.0.1:8888/callback"
-	tokenFile          = ".spotify_token.json"
+	defaultRedirectURI = "http://127.0.0.1:8080/callback"
+	defaultTokenFile   = ".spotify_token.json"
 )
 
 var (
@@ -42,6 +42,7 @@ var (
 	state          = "spotify-shortcut-state"
 	spotifyClient  *spotify.Client
 	apiAccessToken string
+	tokenFile      string
 )
 
 // main is the entry point for the application. It handles authentication,
@@ -66,6 +67,11 @@ func main() {
 	redirectURI := os.Getenv("SPOTIFY_REDIRECT_URI")
 	if redirectURI == "" {
 		redirectURI = defaultRedirectURI
+	}
+
+	tokenFile = os.Getenv("SPOTIFY_TOKEN_FILE")
+	if tokenFile == "" {
+		tokenFile = defaultTokenFile
 	}
 
 	// Playlist ID from flag takes priority over env var
@@ -109,7 +115,28 @@ func main() {
 		),
 	)
 
-	// Try to load existing token
+	// If --server flag is set, start HTTP API server
+	// In server mode, we try to load an existing token but don't require it
+	// Users can authenticate via /auth endpoint
+	if *serverMode {
+		client, err := loadToken()
+		if err == nil {
+			ctx := context.Background()
+			user, err := client.CurrentUser(ctx)
+			if err == nil {
+				fmt.Printf("Authenticated as: %s\n", user.DisplayName)
+				spotifyClient = client
+			} else {
+				fmt.Println("Existing token expired. Visit /auth to re-authenticate.")
+			}
+		} else {
+			fmt.Println("No Spotify token found. Visit /auth to authenticate.")
+		}
+		startAPIServer()
+		return
+	}
+
+	// For CLI mode, require authentication
 	client, err := loadToken()
 	if err != nil {
 		// No valid token, need to authenticate
@@ -131,14 +158,8 @@ func main() {
 
 	fmt.Printf("Authenticated as: %s\n", user.DisplayName)
 
-	// Store client globally for server mode
+	// Store client globally
 	spotifyClient = client
-
-	// If --server flag is set, start HTTP API server
-	if *serverMode {
-		startAPIServer()
-		return
-	}
 
 	// If --playlists flag is set, list playlists and exit
 	if *listPlaylists {
@@ -303,7 +324,7 @@ func authenticate() *spotify.Client {
 	})
 
 	go func() {
-		err := http.ListenAndServe(":8888", nil)
+		err := http.ListenAndServe(":8080", nil)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -519,12 +540,15 @@ type APIResponse struct {
 
 // startAPIServer starts the HTTP API server for remote control.
 func startAPIServer() {
-	port := os.Getenv("API_SERVER_PORT")
+	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleRootRequest)
+	mux.HandleFunc("/auth", handleAuthRequest)
+	mux.HandleFunc("/callback", handleAuthCallback)
 	mux.HandleFunc("/api/v1/play", handlePlayRequest)
 
 	fmt.Printf("Starting API server on port %s...\n", port)
@@ -535,6 +559,57 @@ func startAPIServer() {
 	if err != nil {
 		log.Fatalf("Failed to start API server: %v", err)
 	}
+}
+
+// handleRootRequest handles requests to the root path with a simple message.
+func handleRootRequest(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, "app coming soon....")
+}
+
+// handleAuthRequest redirects the user to Spotify's authorization page.
+// Requires the API access token for security.
+func handleAuthRequest(w http.ResponseWriter, r *http.Request) {
+	// Verify access token
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+
+	if token != apiAccessToken {
+		http.Error(w, "Unauthorized: Invalid or missing access token", http.StatusUnauthorized)
+		return
+	}
+
+	url := auth.AuthURL(state)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+// handleAuthCallback handles the OAuth callback from Spotify after user authorization.
+func handleAuthCallback(w http.ResponseWriter, r *http.Request) {
+	tok, err := auth.Token(r.Context(), state, r)
+	if err != nil {
+		http.Error(w, "Failed to get token: "+err.Error(), http.StatusForbidden)
+		return
+	}
+
+	if st := r.FormValue("state"); st != state {
+		http.Error(w, "State mismatch", http.StatusForbidden)
+		return
+	}
+
+	// Save token for future use
+	saveToken(tok)
+
+	// Update the global client with the new token
+	spotifyClient = spotify.New(auth.Client(r.Context(), tok))
+
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, "Authentication successful! You can close this window.")
 }
 
 // handlePlayRequest handles the /api/v1/play endpoint to start playlist playback.
@@ -592,6 +667,10 @@ func handlePlayRequest(w http.ResponseWriter, r *http.Request) {
 // playPlaylist starts playback of a playlist on the specified device.
 // This function is used by both CLI and API server modes.
 func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error) {
+	if spotifyClient == nil {
+		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+
 	ctx := context.Background()
 
 	// Get available devices

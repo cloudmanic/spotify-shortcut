@@ -22,7 +22,7 @@ A command-line tool to quickly play Spotify playlists on Spotify Connect devices
 
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
 2. Create a new application
-3. Add `http://127.0.0.1:8888/callback` to the Redirect URIs in your app settings
+3. Add `http://127.0.0.1:8080/callback` to the Redirect URIs in your app settings
 4. Copy your Client ID and Client Secret
 
 ## Installation
@@ -57,11 +57,11 @@ SPOTIFY_CLIENT_SECRET=your-client-secret-here
 # Optional defaults
 SPOTIFY_PLAYLIST_ID=your-default-playlist-id
 SPOTIFY_DEVICE_NAME=your-default-device-name
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8080/callback
 
 # API Server mode (required for -server flag)
 API_ACCESS_TOKEN=your-secret-api-token-here
-API_SERVER_PORT=8080
+PORT=8080
 ```
 
 ## Usage
@@ -122,15 +122,15 @@ On first run, the app will open a URL for Spotify authentication. Visit the URL 
 
 ## Command-Line Flags
 
-| Flag | Description |
-|------|-------------|
-| `-playlist` | Playlist name, ID, or URL to play |
-| `-device` | Device name or ID to play on |
-| `-shuffle` | Enable shuffle mode and start at random track |
-| `-devices` | List available Spotify Connect devices and exit |
-| `-playlists` | List your Spotify playlists and exit |
-| `-server` | Start as HTTP API server |
-| `-debug` | Print raw API responses for debugging |
+| Flag         | Description                                     |
+| ------------ | ----------------------------------------------- |
+| `-playlist`  | Playlist name, ID, or URL to play               |
+| `-device`    | Device name or ID to play on                    |
+| `-shuffle`   | Enable shuffle mode and start at random track   |
+| `-devices`   | List available Spotify Connect devices and exit |
+| `-playlists` | List your Spotify playlists and exit            |
+| `-server`    | Start as HTTP API server                        |
+| `-debug`     | Print raw API responses for debugging           |
 
 ## Examples
 
@@ -156,7 +156,7 @@ Run the application as an HTTP API server for remote control and integrations:
 ./spotify-shortcut -server
 ```
 
-The server listens on the port specified by `API_SERVER_PORT` (default: 8080).
+The server listens on the port specified by `PORT` (default: 8080).
 
 ### Authentication
 
@@ -232,7 +232,7 @@ Make sure you have an active Spotify session on at least one device. Open Spotif
 
 ### "Invalid redirect URI"
 
-Ensure the redirect URI in your Spotify Developer Dashboard matches exactly: `http://127.0.0.1:8888/callback`
+Ensure the redirect URI in your Spotify Developer Dashboard matches exactly: `http://127.0.0.1:8080/callback`
 
 ### "Resource not found" for playlist
 
