@@ -1,0 +1,19 @@
+# Environment files
+.env
+
+# OAuth token cache
+.spotify_token.json
+
+# Build output
+spotify-shortcut
+spotify-shortcut.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
