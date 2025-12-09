@@ -56,6 +56,7 @@ func main() {
 	deviceFlag := flag.String("device", "", "Device name or ID to play on")
 	playlistFlag := flag.String("playlist", "", "Playlist ID or URL to play")
 	serverMode := flag.Bool("server", false, "Start as HTTP API server")
+	pauseMode := flag.Bool("pause", false, "Pause playback on all devices")
 	flag.Parse()
 
 	// Load .env file if it exists (ignore error if not found)
@@ -90,8 +91,8 @@ func main() {
 		log.Fatal("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables are required")
 	}
 
-	// Only require playlist ID if not listing devices, playlists, or running in server mode
-	if playlistID == "" && !*listDevices && !*listPlaylists && !*serverMode {
+	// Only require playlist ID if not listing devices, playlists, pausing, or running in server mode
+	if playlistID == "" && !*listDevices && !*listPlaylists && !*serverMode && !*pauseMode {
 		log.Fatal("SPOTIFY_PLAYLIST_ID is required. Use -playlist flag or set in .env")
 	}
 
@@ -196,6 +197,16 @@ func main() {
 		}
 
 		printPlaylistsTable(allPlaylists)
+		return
+	}
+
+	// If --pause flag is set, pause playback and exit
+	if *pauseMode {
+		result, err := pausePlayback()
+		if err != nil {
+			log.Fatalf("Failed to pause: %v", err)
+		}
+		fmt.Println(result)
 		return
 	}
 
@@ -550,10 +561,12 @@ func startAPIServer() {
 	mux.HandleFunc("/auth", handleAuthRequest)
 	mux.HandleFunc("/callback", handleAuthCallback)
 	mux.HandleFunc("/api/v1/play", handlePlayRequest)
+	mux.HandleFunc("/api/v1/pause", handlePauseRequest)
 
 	fmt.Printf("Starting API server on port %s...\n", port)
 	fmt.Println("Endpoints:")
 	fmt.Println("  GET /api/v1/play?device=<name>&playlist=<name|id|url>&shuffle=<true|false>")
+	fmt.Println("  GET /api/v1/pause")
 
 	err := http.ListenAndServe(":"+port, mux)
 	if err != nil {
@@ -759,6 +772,59 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	}
 
 	return fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name), nil
+}
+
+// pausePlayback pauses the current Spotify playback.
+// This function is used by both CLI and API server modes.
+func pausePlayback() (string, error) {
+	if spotifyClient == nil {
+		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+
+	ctx := context.Background()
+
+	err := spotifyClient.Pause(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to pause playback: %w", err)
+	}
+
+	return "Playback paused", nil
+}
+
+// handlePauseRequest handles the /api/v1/pause endpoint to pause playback.
+func handlePauseRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Verify access token
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+
+	if token != apiAccessToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Error:   "Invalid or missing access token",
+		})
+		return
+	}
+
+	// Pause playback
+	result, err := pausePlayback()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: result,
+	})
 }
 
 // resolvePlaylistIDQuiet resolves a playlist input without printing to stdout.

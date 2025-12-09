@@ -1,10 +1,23 @@
 # Spotify Shortcut
 
-A command-line tool to quickly play Spotify playlists on Spotify Connect devices. Built for automation and quick access to your favorite playlists.
+A Spotify proxy that makes voice assistant integrations simple. Control Spotify playback on any Spotify Connect device via HTTP requests—perfect for Apple Siri Shortcuts, Home Assistant, and other automation tools.
+
+## Why This Exists
+
+Controlling Spotify on third-party speakers through Siri is frustrating. If you have whole-home audio with devices like [WiiM Amps](https://www.amazon.com/dp/B0CGCLXH4H) or other Spotify Connect receivers, you can't easily use Siri to start music on them. HomePods and AirPlay work great with Apple Music, but Spotify users are left with clunky workarounds.
+
+This app solves that problem by acting as a Spotify proxy:
+
+1. **Deploy once** - Run the server on a Raspberry Pi, NAS, or cloud service
+2. **Create a Siri Shortcut** - Make a shortcut that sends an HTTP request to this app
+3. **Say "Hey Siri, play my playlist"** - Siri triggers the shortcut, which tells Spotify to play on your chosen speaker
+
+Because it's a simple HTTP API, you can use it with any automation platform—not just Siri. Stream Deck buttons, cron jobs, Home Assistant automations, or any system that can make HTTP requests.
 
 ## Features
 
 - Play any playlist by name, ID, or URL
+- Pause playback
 - Target specific Spotify Connect devices
 - Optional shuffle mode with random starting track
 - List available devices and playlists
@@ -112,6 +125,13 @@ On first run, the app will open a URL for Spotify authentication. Visit the URL 
 ./spotify-shortcut -playlists
 ```
 
+### Pause Playback
+
+```bash
+# Pause music on all devices
+./spotify-shortcut -pause
+```
+
 ### Debug Mode
 
 ```bash
@@ -127,6 +147,7 @@ On first run, the app will open a URL for Spotify authentication. Visit the URL 
 | `-playlist`  | Playlist name, ID, or URL to play               |
 | `-device`    | Device name or ID to play on                    |
 | `-shuffle`   | Enable shuffle mode and start at random track   |
+| `-pause`     | Pause playback on all devices                   |
 | `-devices`   | List available Spotify Connect devices and exit |
 | `-playlists` | List your Spotify playlists and exit            |
 | `-server`    | Start as HTTP API server                        |
@@ -205,6 +226,35 @@ curl -H "Authorization: Bearer your-token" \
 {
   "success": false,
   "error": "Invalid or missing access token"
+}
+```
+
+#### GET /api/v1/pause
+
+Pause the current playback.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `token` | Yes* | API access token (*or use Authorization header) |
+
+**Example requests:**
+
+```bash
+# Using query parameter for token
+curl "http://localhost:8080/api/v1/pause?token=your-token"
+
+# Using Authorization header
+curl -H "Authorization: Bearer your-token" \
+  "http://localhost:8080/api/v1/pause"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Playback paused"
 }
 ```
 
