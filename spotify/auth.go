@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Authentication logic for Spotify OAuth flow.
 //
 
-package main
+package spotify
 
 import (
 	"context"
@@ -16,13 +16,31 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/zmb3/spotify/v2"
+	spotifyLib "github.com/zmb3/spotify/v2"
 	"golang.org/x/oauth2"
+
+	spotifyauth "github.com/zmb3/spotify/v2/auth"
 )
 
-// authenticate starts the OAuth flow and returns an authenticated Spotify client.
+// InitAuth initializes the Spotify authenticator with the provided credentials.
+func InitAuth(clientID, clientSecret, redirectURI string) {
+	auth = spotifyauth.New(
+		spotifyauth.WithClientID(clientID),
+		spotifyauth.WithClientSecret(clientSecret),
+		spotifyauth.WithRedirectURL(redirectURI),
+		spotifyauth.WithScopes(
+			spotifyauth.ScopeUserReadPlaybackState,
+			spotifyauth.ScopeUserModifyPlaybackState,
+			spotifyauth.ScopeUserReadCurrentlyPlaying,
+			spotifyauth.ScopePlaylistReadPrivate,
+			spotifyauth.ScopePlaylistReadCollaborative,
+		),
+	)
+}
+
+// Authenticate starts the OAuth flow and returns an authenticated Spotify client.
 // It starts a local HTTP server to handle the callback from Spotify.
-func authenticate() *spotify.Client {
+func Authenticate() *spotifyLib.Client {
 	http.HandleFunc("/callback", completeAuth)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Got request for:", r.URL.String())
@@ -59,15 +77,15 @@ func completeAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save token for future use
-	saveToken(tok)
+	SaveToken(tok)
 
-	client := spotify.New(auth.Client(r.Context(), tok))
+	client := spotifyLib.New(auth.Client(r.Context(), tok))
 	fmt.Fprintf(w, "Authentication successful! You can close this window.")
 	ch <- client
 }
 
-// saveToken saves the OAuth token to a file for reuse in future sessions.
-func saveToken(token *oauth2.Token) {
+// SaveToken saves the OAuth token to a file for reuse in future sessions.
+func SaveToken(token *oauth2.Token) {
 	file, err := os.Create(tokenFile)
 	if err != nil {
 		log.Printf("Warning: Failed to save token: %v", err)
@@ -81,9 +99,9 @@ func saveToken(token *oauth2.Token) {
 	}
 }
 
-// loadToken attempts to load a previously saved OAuth token from disk
+// LoadToken attempts to load a previously saved OAuth token from disk
 // and returns a Spotify client if the token is still valid.
-func loadToken() (*spotify.Client, error) {
+func LoadToken() (*spotifyLib.Client, error) {
 	file, err := os.Open(tokenFile)
 	if err != nil {
 		return nil, err
@@ -98,7 +116,7 @@ func loadToken() (*spotify.Client, error) {
 
 	// Create a new authenticator and client with the saved token
 	ctx := context.Background()
-	client := spotify.New(auth.Client(ctx, &token))
+	client := spotifyLib.New(auth.Client(ctx, &token))
 
 	return client, nil
 }

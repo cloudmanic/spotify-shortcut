@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: HTTP API server and request handlers.
 //
 
-package main
+package spotify
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zmb3/spotify/v2"
+	spotifyLib "github.com/zmb3/spotify/v2"
 )
 
 // loggingResponseWriter wraps http.ResponseWriter to capture the status code.
@@ -48,19 +48,19 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// startAPIServer starts the HTTP API server for remote control.
-func startAPIServer() {
+// StartAPIServer starts the HTTP API server for remote control.
+func StartAPIServer() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRootRequest)
-	mux.HandleFunc("/auth", handleAuthRequest)
-	mux.HandleFunc("/callback", handleAuthCallback)
-	mux.HandleFunc("/api/v1/play", handlePlayRequest)
-	mux.HandleFunc("/api/v1/pause", handlePauseRequest)
+	mux.HandleFunc("/", HandleRootRequest)
+	mux.HandleFunc("/auth", HandleAuthRequest)
+	mux.HandleFunc("/callback", HandleAuthCallback)
+	mux.HandleFunc("/api/v1/play", HandlePlayRequest)
+	mux.HandleFunc("/api/v1/pause", HandlePauseRequest)
 
 	fmt.Printf("Starting API server on port %s...\n", port)
 	fmt.Println("Endpoints:")
@@ -76,8 +76,8 @@ func startAPIServer() {
 	}
 }
 
-// handleRootRequest handles requests to the root path with a simple message.
-func handleRootRequest(w http.ResponseWriter, r *http.Request) {
+// HandleRootRequest handles requests to the root path with a simple message.
+func HandleRootRequest(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -86,9 +86,9 @@ func handleRootRequest(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "app coming soon....")
 }
 
-// handleAuthRequest redirects the user to Spotify's authorization page.
+// HandleAuthRequest redirects the user to Spotify's authorization page.
 // Requires the API access token for security.
-func handleAuthRequest(w http.ResponseWriter, r *http.Request) {
+func HandleAuthRequest(w http.ResponseWriter, r *http.Request) {
 	// Verify access token
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -104,8 +104,8 @@ func handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
-// handleAuthCallback handles the OAuth callback from Spotify after user authorization.
-func handleAuthCallback(w http.ResponseWriter, r *http.Request) {
+// HandleAuthCallback handles the OAuth callback from Spotify after user authorization.
+func HandleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	tok, err := auth.Token(r.Context(), state, r)
 	if err != nil {
 		http.Error(w, "Failed to get token: "+err.Error(), http.StatusForbidden)
@@ -118,17 +118,17 @@ func handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save token for future use
-	saveToken(tok)
+	SaveToken(tok)
 
 	// Update the global client with the new token
-	spotifyClient = spotify.New(auth.Client(r.Context(), tok))
+	spotifyClient = spotifyLib.New(auth.Client(r.Context(), tok))
 
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprint(w, "Authentication successful! You can close this window.")
 }
 
-// handlePlayRequest handles the /api/v1/play endpoint to start playlist playback.
-func handlePlayRequest(w http.ResponseWriter, r *http.Request) {
+// HandlePlayRequest handles the /api/v1/play endpoint to start playlist playback.
+func HandlePlayRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Verify access token
@@ -163,7 +163,7 @@ func handlePlayRequest(w http.ResponseWriter, r *http.Request) {
 	shuffle := strings.ToLower(shuffleStr) == "true"
 
 	// Play the playlist
-	result, err := playPlaylist(deviceName, playlistInput, shuffle)
+	result, err := PlayPlaylist(deviceName, playlistInput, shuffle)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(APIResponse{
@@ -179,8 +179,8 @@ func handlePlayRequest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePauseRequest handles the /api/v1/pause endpoint to pause playback.
-func handlePauseRequest(w http.ResponseWriter, r *http.Request) {
+// HandlePauseRequest handles the /api/v1/pause endpoint to pause playback.
+func HandlePauseRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Verify access token
@@ -199,7 +199,7 @@ func handlePauseRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pause playback
-	result, err := pausePlayback()
+	result, err := PausePlayback()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(APIResponse{

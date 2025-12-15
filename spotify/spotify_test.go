@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Unit tests for Spotify Shortcut application.
 //
 
-package main
+package spotify
 
 import (
 	"context"
@@ -18,13 +18,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zmb3/spotify/v2"
+	spotifyLib "github.com/zmb3/spotify/v2"
 	"golang.org/x/oauth2"
 )
 
 // createFullPlaylist creates a FullPlaylist with the Total field set via JSON unmarshaling.
 // This is necessary because the basePage struct is unexported.
-func createFullPlaylist(id spotify.ID, name string, total int) *spotify.FullPlaylist {
+func createFullPlaylist(id spotifyLib.ID, name string, total int) *spotifyLib.FullPlaylist {
 	jsonData := []byte(`{
 		"id": "` + string(id) + `",
 		"name": "` + name + `",
@@ -32,15 +32,15 @@ func createFullPlaylist(id spotify.ID, name string, total int) *spotify.FullPlay
 			"total": ` + string(rune('0'+total/10)) + string(rune('0'+total%10)) + `
 		}
 	}`)
-	var playlist spotify.FullPlaylist
+	var playlist spotifyLib.FullPlaylist
 	json.Unmarshal(jsonData, &playlist)
 	return &playlist
 }
 
 // createFullPlaylistWithTotal creates a FullPlaylist with a specific total using JSON.
-func createFullPlaylistWithTotal(id string, name string, total int) *spotify.FullPlaylist {
+func createFullPlaylistWithTotal(id string, name string, total int) *spotifyLib.FullPlaylist {
 	jsonStr := `{"id":"` + id + `","name":"` + name + `","tracks":{"total":` + itoa(total) + `}}`
-	var playlist spotify.FullPlaylist
+	var playlist spotifyLib.FullPlaylist
 	json.Unmarshal([]byte(jsonStr), &playlist)
 	return &playlist
 }
@@ -58,22 +58,22 @@ func itoa(i int) string {
 	return result
 }
 
-// MockSpotifyClient is a mock implementation of the SpotifyClient interface for testing.
+// MockSpotifyClient is a mock implementation of the Client interface for testing.
 type MockSpotifyClient struct {
 	// CurrentUser mock
-	CurrentUserFunc func(ctx context.Context) (*spotify.PrivateUser, error)
+	CurrentUserFunc func(ctx context.Context) (*spotifyLib.PrivateUser, error)
 
 	// CurrentUsersPlaylists mock
-	CurrentUsersPlaylistsFunc func(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error)
+	CurrentUsersPlaylistsFunc func(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error)
 
 	// PlayerDevices mock
-	PlayerDevicesFunc func(ctx context.Context) ([]spotify.PlayerDevice, error)
+	PlayerDevicesFunc func(ctx context.Context) ([]spotifyLib.PlayerDevice, error)
 
 	// GetPlaylist mock
-	GetPlaylistFunc func(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error)
+	GetPlaylistFunc func(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error)
 
 	// PlayOpt mock
-	PlayOptFunc func(ctx context.Context, opts *spotify.PlayOptions) error
+	PlayOptFunc func(ctx context.Context, opts *spotifyLib.PlayOptions) error
 
 	// Pause mock
 	PauseFunc func(ctx context.Context) error
@@ -83,12 +83,12 @@ type MockSpotifyClient struct {
 }
 
 // CurrentUser returns the current user.
-func (m *MockSpotifyClient) CurrentUser(ctx context.Context) (*spotify.PrivateUser, error) {
+func (m *MockSpotifyClient) CurrentUser(ctx context.Context) (*spotifyLib.PrivateUser, error) {
 	if m.CurrentUserFunc != nil {
 		return m.CurrentUserFunc(ctx)
 	}
-	return &spotify.PrivateUser{
-		User: spotify.User{
+	return &spotifyLib.PrivateUser{
+		User: spotifyLib.User{
 			DisplayName: "Test User",
 			ID:          "testuser123",
 		},
@@ -96,12 +96,12 @@ func (m *MockSpotifyClient) CurrentUser(ctx context.Context) (*spotify.PrivateUs
 }
 
 // CurrentUsersPlaylists returns the user's playlists.
-func (m *MockSpotifyClient) CurrentUsersPlaylists(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error) {
+func (m *MockSpotifyClient) CurrentUsersPlaylists(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error) {
 	if m.CurrentUsersPlaylistsFunc != nil {
 		return m.CurrentUsersPlaylistsFunc(ctx, opts...)
 	}
-	return &spotify.SimplePlaylistPage{
-		Playlists: []spotify.SimplePlaylist{
+	return &spotifyLib.SimplePlaylistPage{
+		Playlists: []spotifyLib.SimplePlaylist{
 			{
 				ID:   "playlist123",
 				Name: "Test Playlist",
@@ -115,11 +115,11 @@ func (m *MockSpotifyClient) CurrentUsersPlaylists(ctx context.Context, opts ...s
 }
 
 // PlayerDevices returns available devices.
-func (m *MockSpotifyClient) PlayerDevices(ctx context.Context) ([]spotify.PlayerDevice, error) {
+func (m *MockSpotifyClient) PlayerDevices(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
 	if m.PlayerDevicesFunc != nil {
 		return m.PlayerDevicesFunc(ctx)
 	}
-	return []spotify.PlayerDevice{
+	return []spotifyLib.PlayerDevice{
 		{
 			ID:     "device123",
 			Name:   "Living Room Speaker",
@@ -136,7 +136,7 @@ func (m *MockSpotifyClient) PlayerDevices(ctx context.Context) ([]spotify.Player
 }
 
 // GetPlaylist returns a playlist by ID.
-func (m *MockSpotifyClient) GetPlaylist(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error) {
+func (m *MockSpotifyClient) GetPlaylist(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error) {
 	if m.GetPlaylistFunc != nil {
 		return m.GetPlaylistFunc(ctx, playlistID, opts...)
 	}
@@ -144,7 +144,7 @@ func (m *MockSpotifyClient) GetPlaylist(ctx context.Context, playlistID spotify.
 }
 
 // PlayOpt starts playback with options.
-func (m *MockSpotifyClient) PlayOpt(ctx context.Context, opts *spotify.PlayOptions) error {
+func (m *MockSpotifyClient) PlayOpt(ctx context.Context, opts *spotifyLib.PlayOptions) error {
 	if m.PlayOptFunc != nil {
 		return m.PlayOptFunc(ctx, opts)
 	}
@@ -167,7 +167,7 @@ func (m *MockSpotifyClient) Shuffle(ctx context.Context, shuffle bool) error {
 	return nil
 }
 
-// TestExtractPlaylistID tests the extractPlaylistID function.
+// TestExtractPlaylistID tests the ExtractPlaylistID function.
 func TestExtractPlaylistID(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -198,20 +198,20 @@ func TestExtractPlaylistID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractPlaylistID(tt.input)
+			result := ExtractPlaylistID(tt.input)
 			if result != tt.expected {
-				t.Errorf("extractPlaylistID(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("ExtractPlaylistID(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
-// TestResolvePlaylistIDQuiet_URL tests resolvePlaylistIDQuiet with URL input.
+// TestResolvePlaylistIDQuiet_URL tests ResolvePlaylistIDQuiet with URL input.
 func TestResolvePlaylistIDQuiet_URL(t *testing.T) {
 	mock := &MockSpotifyClient{}
 	ctx := context.Background()
 
-	result, err := resolvePlaylistIDQuiet(ctx, mock, "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+	result, err := ResolvePlaylistIDQuiet(ctx, mock, "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,13 +220,13 @@ func TestResolvePlaylistIDQuiet_URL(t *testing.T) {
 	}
 }
 
-// TestResolvePlaylistIDQuiet_ID tests resolvePlaylistIDQuiet with a 22-char ID.
+// TestResolvePlaylistIDQuiet_ID tests ResolvePlaylistIDQuiet with a 22-char ID.
 func TestResolvePlaylistIDQuiet_ID(t *testing.T) {
 	mock := &MockSpotifyClient{}
 	ctx := context.Background()
 
 	// 22 character ID
-	result, err := resolvePlaylistIDQuiet(ctx, mock, "37i9dQZF1DXcBWIGoYBM5M")
+	result, err := ResolvePlaylistIDQuiet(ctx, mock, "37i9dQZF1DXcBWIGoYBM5M")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -235,12 +235,12 @@ func TestResolvePlaylistIDQuiet_ID(t *testing.T) {
 	}
 }
 
-// TestResolvePlaylistIDQuiet_Name tests resolvePlaylistIDQuiet with playlist name.
+// TestResolvePlaylistIDQuiet_Name tests ResolvePlaylistIDQuiet with playlist name.
 func TestResolvePlaylistIDQuiet_Name(t *testing.T) {
 	mock := &MockSpotifyClient{
-		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error) {
-			return &spotify.SimplePlaylistPage{
-				Playlists: []spotify.SimplePlaylist{
+		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error) {
+			return &spotifyLib.SimplePlaylistPage{
+				Playlists: []spotifyLib.SimplePlaylist{
 					{ID: "found123playlistid00", Name: "My Awesome Playlist"},
 					{ID: "other456playlistid00", Name: "Other Playlist"},
 				},
@@ -249,7 +249,7 @@ func TestResolvePlaylistIDQuiet_Name(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	result, err := resolvePlaylistIDQuiet(ctx, mock, "My Awesome Playlist")
+	result, err := ResolvePlaylistIDQuiet(ctx, mock, "My Awesome Playlist")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,9 +261,9 @@ func TestResolvePlaylistIDQuiet_Name(t *testing.T) {
 // TestResolvePlaylistIDQuiet_NameCaseInsensitive tests case-insensitive name matching.
 func TestResolvePlaylistIDQuiet_NameCaseInsensitive(t *testing.T) {
 	mock := &MockSpotifyClient{
-		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error) {
-			return &spotify.SimplePlaylistPage{
-				Playlists: []spotify.SimplePlaylist{
+		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error) {
+			return &spotifyLib.SimplePlaylistPage{
+				Playlists: []spotifyLib.SimplePlaylist{
 					{ID: "found123playlistid00", Name: "My Awesome Playlist"},
 				},
 			}, nil
@@ -271,7 +271,7 @@ func TestResolvePlaylistIDQuiet_NameCaseInsensitive(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	result, err := resolvePlaylistIDQuiet(ctx, mock, "my awesome playlist")
+	result, err := ResolvePlaylistIDQuiet(ctx, mock, "my awesome playlist")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -283,16 +283,16 @@ func TestResolvePlaylistIDQuiet_NameCaseInsensitive(t *testing.T) {
 // TestResolvePlaylistIDQuiet_NotFound tests when playlist is not found by name.
 func TestResolvePlaylistIDQuiet_NotFound(t *testing.T) {
 	mock := &MockSpotifyClient{
-		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error) {
-			return &spotify.SimplePlaylistPage{
-				Playlists: []spotify.SimplePlaylist{},
+		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error) {
+			return &spotifyLib.SimplePlaylistPage{
+				Playlists: []spotifyLib.SimplePlaylist{},
 			}, nil
 		},
 	}
 	ctx := context.Background()
 
 	// When not found, it returns the input as-is (assuming it's an ID)
-	result, err := resolvePlaylistIDQuiet(ctx, mock, "Unknown Playlist")
+	result, err := ResolvePlaylistIDQuiet(ctx, mock, "Unknown Playlist")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,13 +304,13 @@ func TestResolvePlaylistIDQuiet_NotFound(t *testing.T) {
 // TestResolvePlaylistIDQuiet_APIError tests API error handling.
 func TestResolvePlaylistIDQuiet_APIError(t *testing.T) {
 	mock := &MockSpotifyClient{
-		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotify.RequestOption) (*spotify.SimplePlaylistPage, error) {
+		CurrentUsersPlaylistsFunc: func(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.SimplePlaylistPage, error) {
 			return nil, errors.New("API error")
 		},
 	}
 	ctx := context.Background()
 
-	_, err := resolvePlaylistIDQuiet(ctx, mock, "Some Playlist")
+	_, err := ResolvePlaylistIDQuiet(ctx, mock, "Some Playlist")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -335,7 +335,7 @@ func TestSaveAndLoadToken(t *testing.T) {
 	}
 
 	// Save the token
-	saveToken(testToken)
+	SaveToken(testToken)
 
 	// Verify the file was created
 	if _, err := os.Stat(testTokenFile); os.IsNotExist(err) {
@@ -375,7 +375,7 @@ func TestPausePlayback_Success(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	result, err := pausePlayback()
+	result, err := PausePlayback()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestPausePlayback_Error(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	_, err := pausePlayback()
+	_, err := PausePlayback()
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -408,7 +408,7 @@ func TestPausePlayback_NotAuthenticated(t *testing.T) {
 	spotifyClient = nil
 	defer func() { spotifyClient = originalClient }()
 
-	_, err := pausePlayback()
+	_, err := PausePlayback()
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -421,15 +421,15 @@ func TestPausePlayback_NotAuthenticated(t *testing.T) {
 func TestPlayPlaylist_Success(t *testing.T) {
 	playOptCalled := false
 	mock := &MockSpotifyClient{
-		PlayerDevicesFunc: func(ctx context.Context) ([]spotify.PlayerDevice, error) {
-			return []spotify.PlayerDevice{
+		PlayerDevicesFunc: func(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
+			return []spotifyLib.PlayerDevice{
 				{ID: "device123", Name: "Test Speaker", Active: true},
 			}, nil
 		},
-		GetPlaylistFunc: func(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error) {
+		GetPlaylistFunc: func(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error) {
 			return createFullPlaylistWithTotal(string(playlistID), "Test Playlist", 10), nil
 		},
-		PlayOptFunc: func(ctx context.Context, opts *spotify.PlayOptions) error {
+		PlayOptFunc: func(ctx context.Context, opts *spotifyLib.PlayOptions) error {
 			playOptCalled = true
 			return nil
 		},
@@ -439,7 +439,7 @@ func TestPlayPlaylist_Success(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	result, err := playPlaylist("Test Speaker", "37i9dQZF1DXcBWIGoYBM5M", false)
+	result, err := PlayPlaylist("Test Speaker", "37i9dQZF1DXcBWIGoYBM5M", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -455,15 +455,15 @@ func TestPlayPlaylist_Success(t *testing.T) {
 func TestPlayPlaylist_WithShuffle(t *testing.T) {
 	shuffleCalled := false
 	mock := &MockSpotifyClient{
-		PlayerDevicesFunc: func(ctx context.Context) ([]spotify.PlayerDevice, error) {
-			return []spotify.PlayerDevice{
+		PlayerDevicesFunc: func(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
+			return []spotifyLib.PlayerDevice{
 				{ID: "device123", Name: "Test Speaker", Active: true},
 			}, nil
 		},
-		GetPlaylistFunc: func(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error) {
+		GetPlaylistFunc: func(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error) {
 			return createFullPlaylistWithTotal(string(playlistID), "Test Playlist", 10), nil
 		},
-		PlayOptFunc: func(ctx context.Context, opts *spotify.PlayOptions) error {
+		PlayOptFunc: func(ctx context.Context, opts *spotifyLib.PlayOptions) error {
 			return nil
 		},
 		ShuffleFunc: func(ctx context.Context, shuffle bool) error {
@@ -479,7 +479,7 @@ func TestPlayPlaylist_WithShuffle(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	result, err := playPlaylist("Test Speaker", "37i9dQZF1DXcBWIGoYBM5M", true)
+	result, err := PlayPlaylist("Test Speaker", "37i9dQZF1DXcBWIGoYBM5M", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,8 +494,8 @@ func TestPlayPlaylist_WithShuffle(t *testing.T) {
 // TestPlayPlaylist_NoDevices tests playback when no devices are available.
 func TestPlayPlaylist_NoDevices(t *testing.T) {
 	mock := &MockSpotifyClient{
-		PlayerDevicesFunc: func(ctx context.Context) ([]spotify.PlayerDevice, error) {
-			return []spotify.PlayerDevice{}, nil
+		PlayerDevicesFunc: func(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
+			return []spotifyLib.PlayerDevice{}, nil
 		},
 	}
 
@@ -503,7 +503,7 @@ func TestPlayPlaylist_NoDevices(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	_, err := playPlaylist("", "37i9dQZF1DXcBWIGoYBM5M", false)
+	_, err := PlayPlaylist("", "37i9dQZF1DXcBWIGoYBM5M", false)
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -515,7 +515,7 @@ func TestPlayPlaylist_NotAuthenticated(t *testing.T) {
 	spotifyClient = nil
 	defer func() { spotifyClient = originalClient }()
 
-	_, err := playPlaylist("", "37i9dQZF1DXcBWIGoYBM5M", false)
+	_, err := PlayPlaylist("", "37i9dQZF1DXcBWIGoYBM5M", false)
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -525,17 +525,17 @@ func TestPlayPlaylist_NotAuthenticated(t *testing.T) {
 func TestPlayPlaylist_DeviceSelection(t *testing.T) {
 	selectedDeviceID := ""
 	mock := &MockSpotifyClient{
-		PlayerDevicesFunc: func(ctx context.Context) ([]spotify.PlayerDevice, error) {
-			return []spotify.PlayerDevice{
+		PlayerDevicesFunc: func(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
+			return []spotifyLib.PlayerDevice{
 				{ID: "device1", Name: "First Speaker", Active: false},
 				{ID: "device2", Name: "Second Speaker", Active: false},
 				{ID: "device3", Name: "Target Speaker", Active: false},
 			}, nil
 		},
-		GetPlaylistFunc: func(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error) {
+		GetPlaylistFunc: func(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error) {
 			return createFullPlaylistWithTotal(string(playlistID), "Test", 10), nil
 		},
-		PlayOptFunc: func(ctx context.Context, opts *spotify.PlayOptions) error {
+		PlayOptFunc: func(ctx context.Context, opts *spotifyLib.PlayOptions) error {
 			if opts.DeviceID != nil {
 				selectedDeviceID = string(*opts.DeviceID)
 			}
@@ -547,7 +547,7 @@ func TestPlayPlaylist_DeviceSelection(t *testing.T) {
 	spotifyClient = mock
 	defer func() { spotifyClient = originalClient }()
 
-	_, err := playPlaylist("Target Speaker", "37i9dQZF1DXcBWIGoYBM5M", false)
+	_, err := PlayPlaylist("Target Speaker", "37i9dQZF1DXcBWIGoYBM5M", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestHandlePauseRequest_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/pause?token=test-token", nil)
 	w := httptest.NewRecorder()
 
-	handlePauseRequest(w, req)
+	HandlePauseRequest(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -604,7 +604,7 @@ func TestHandlePauseRequest_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/pause", nil)
 	w := httptest.NewRecorder()
 
-	handlePauseRequest(w, req)
+	HandlePauseRequest(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", w.Code)
@@ -620,7 +620,7 @@ func TestHandlePauseRequest_InvalidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/pause?token=wrong-token", nil)
 	w := httptest.NewRecorder()
 
-	handlePauseRequest(w, req)
+	HandlePauseRequest(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", w.Code)
@@ -648,7 +648,7 @@ func TestHandlePauseRequest_BearerToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-token")
 	w := httptest.NewRecorder()
 
-	handlePauseRequest(w, req)
+	HandlePauseRequest(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -658,15 +658,15 @@ func TestHandlePauseRequest_BearerToken(t *testing.T) {
 // TestHandlePlayRequest_Success tests the play API endpoint.
 func TestHandlePlayRequest_Success(t *testing.T) {
 	mock := &MockSpotifyClient{
-		PlayerDevicesFunc: func(ctx context.Context) ([]spotify.PlayerDevice, error) {
-			return []spotify.PlayerDevice{
+		PlayerDevicesFunc: func(ctx context.Context) ([]spotifyLib.PlayerDevice, error) {
+			return []spotifyLib.PlayerDevice{
 				{ID: "device123", Name: "Test Speaker", Active: true},
 			}, nil
 		},
-		GetPlaylistFunc: func(ctx context.Context, playlistID spotify.ID, opts ...spotify.RequestOption) (*spotify.FullPlaylist, error) {
+		GetPlaylistFunc: func(ctx context.Context, playlistID spotifyLib.ID, opts ...spotifyLib.RequestOption) (*spotifyLib.FullPlaylist, error) {
 			return createFullPlaylistWithTotal(string(playlistID), "Test Playlist", 10), nil
 		},
-		PlayOptFunc: func(ctx context.Context, opts *spotify.PlayOptions) error {
+		PlayOptFunc: func(ctx context.Context, opts *spotifyLib.PlayOptions) error {
 			return nil
 		},
 	}
@@ -683,7 +683,7 @@ func TestHandlePlayRequest_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/play?token=test-token&playlist=37i9dQZF1DXcBWIGoYBM5M", nil)
 	w := httptest.NewRecorder()
 
-	handlePlayRequest(w, req)
+	HandlePlayRequest(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -708,7 +708,7 @@ func TestHandlePlayRequest_MissingPlaylist(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/play?token=test-token", nil)
 	w := httptest.NewRecorder()
 
-	handlePlayRequest(w, req)
+	HandlePlayRequest(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", w.Code)
@@ -736,7 +736,7 @@ func TestHandlePlayRequest_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/play?playlist=test", nil)
 	w := httptest.NewRecorder()
 
-	handlePlayRequest(w, req)
+	HandlePlayRequest(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", w.Code)
@@ -748,7 +748,7 @@ func TestHandleRootRequest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	handleRootRequest(w, req)
+	HandleRootRequest(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -765,7 +765,7 @@ func TestHandleRootRequest_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	w := httptest.NewRecorder()
 
-	handleRootRequest(w, req)
+	HandleRootRequest(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", w.Code)
@@ -781,7 +781,7 @@ func TestHandleAuthRequest_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/auth", nil)
 	w := httptest.NewRecorder()
 
-	handleAuthRequest(w, req)
+	HandleAuthRequest(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", w.Code)
@@ -797,7 +797,7 @@ func TestHandleAuthRequest_WrongToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/auth?token=wrong-token", nil)
 	w := httptest.NewRecorder()
 
-	handleAuthRequest(w, req)
+	HandleAuthRequest(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", w.Code)

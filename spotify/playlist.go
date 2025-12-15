@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Playlist resolution and display functions.
 //
 
-package main
+package spotify
 
 import (
 	"context"
@@ -16,12 +16,13 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/zmb3/spotify/v2"
+
+	spotifyLib "github.com/zmb3/spotify/v2"
 )
 
-// extractPlaylistID extracts the playlist ID from a Spotify URL or returns
+// ExtractPlaylistID extracts the playlist ID from a Spotify URL or returns
 // the input as-is if it's already just an ID.
-func extractPlaylistID(input string) string {
+func ExtractPlaylistID(input string) string {
 	// If it's a full URL like https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=xxx
 	if strings.Contains(input, "spotify.com/playlist/") {
 		parts := strings.Split(input, "/playlist/")
@@ -35,13 +36,13 @@ func extractPlaylistID(input string) string {
 	return input
 }
 
-// resolvePlaylistID resolves a playlist input (URL, name, or ID) to a playlist ID.
+// ResolvePlaylistID resolves a playlist input (URL, name, or ID) to a playlist ID.
 // It first checks if it's a URL, then searches the user's playlists by name,
 // and finally assumes it's an ID if no match is found.
-func resolvePlaylistID(ctx context.Context, client *spotify.Client, input string) (string, error) {
+func ResolvePlaylistID(ctx context.Context, client *spotifyLib.Client, input string) (string, error) {
 	// First, check if it's a URL and extract the ID
 	if strings.Contains(input, "spotify.com/playlist/") {
-		return extractPlaylistID(input), nil
+		return ExtractPlaylistID(input), nil
 	}
 
 	// Check if it looks like a Spotify ID (22 alphanumeric characters)
@@ -57,7 +58,7 @@ func resolvePlaylistID(ctx context.Context, client *spotify.Client, input string
 	offset := 0
 
 	for {
-		playlists, err := client.CurrentUsersPlaylists(ctx, spotify.Limit(limit), spotify.Offset(offset))
+		playlists, err := client.CurrentUsersPlaylists(ctx, spotifyLib.Limit(limit), spotifyLib.Offset(offset))
 		if err != nil {
 			return "", fmt.Errorf("failed to get playlists: %w", err)
 		}
@@ -86,12 +87,12 @@ func resolvePlaylistID(ctx context.Context, client *spotify.Client, input string
 	return input, nil
 }
 
-// resolvePlaylistIDQuiet resolves a playlist input without printing to stdout.
+// ResolvePlaylistIDQuiet resolves a playlist input without printing to stdout.
 // Used by the API server to avoid cluttering logs.
-func resolvePlaylistIDQuiet(ctx context.Context, client SpotifyClient, input string) (string, error) {
+func ResolvePlaylistIDQuiet(ctx context.Context, client Client, input string) (string, error) {
 	// First, check if it's a URL and extract the ID
 	if strings.Contains(input, "spotify.com/playlist/") {
-		return extractPlaylistID(input), nil
+		return ExtractPlaylistID(input), nil
 	}
 
 	// Check if it looks like a Spotify ID (22 alphanumeric characters)
@@ -104,7 +105,7 @@ func resolvePlaylistIDQuiet(ctx context.Context, client SpotifyClient, input str
 	offset := 0
 
 	for {
-		playlists, err := client.CurrentUsersPlaylists(ctx, spotify.Limit(limit), spotify.Offset(offset))
+		playlists, err := client.CurrentUsersPlaylists(ctx, spotifyLib.Limit(limit), spotifyLib.Offset(offset))
 		if err != nil {
 			return "", fmt.Errorf("failed to get playlists: %w", err)
 		}
@@ -128,8 +129,8 @@ func resolvePlaylistIDQuiet(ctx context.Context, client SpotifyClient, input str
 	return input, nil
 }
 
-// printPlaylistsTable displays the user's Spotify playlists in a formatted table.
-func printPlaylistsTable(playlists []spotify.SimplePlaylist) {
+// PrintPlaylistsTable displays the user's Spotify playlists in a formatted table.
+func PrintPlaylistsTable(playlists []spotifyLib.SimplePlaylist) {
 	green := color.New(color.FgGreen, color.Bold)
 	cyan := color.New(color.FgCyan)
 

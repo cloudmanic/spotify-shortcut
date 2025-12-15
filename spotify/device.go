@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Device listing and display functions.
 //
 
-package main
+package spotify
 
 import (
 	"fmt"
@@ -14,12 +14,13 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/zmb3/spotify/v2"
+
+	spotifyLib "github.com/zmb3/spotify/v2"
 )
 
-// printDevicesTable displays available Spotify devices in a formatted table
+// PrintDevicesTable displays available Spotify devices in a formatted table
 // with colors to indicate active status.
-func printDevicesTable(devices []spotify.PlayerDevice) {
+func PrintDevicesTable(devices []spotifyLib.PlayerDevice) {
 	green := color.New(color.FgGreen, color.Bold)
 	cyan := color.New(color.FgCyan)
 
