@@ -1,10 +1,9 @@
 //
-// Date: 2025-12-08
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Entry point for the Spotify Shortcut application.
-// Handles command-line flag parsing and delegates to appropriate handlers.
 //
 
 package main
@@ -19,10 +18,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/cloudmanic/spotify-shortcut/spotify"
 	"github.com/joho/godotenv"
-	"github.com/zmb3/spotify/v2"
 
-	spotifyauth "github.com/zmb3/spotify/v2/auth"
+	spotifyLib "github.com/zmb3/spotify/v2"
 )
 
 // main is the entry point for the application. It handles flag parsing
@@ -47,13 +46,14 @@ func main() {
 	clientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
 	redirectURI := os.Getenv("SPOTIFY_REDIRECT_URI")
 	if redirectURI == "" {
-		redirectURI = defaultRedirectURI
+		redirectURI = spotify.DefaultRedirectURI
 	}
 
-	tokenFile = os.Getenv("SPOTIFY_TOKEN_FILE")
+	tokenFile := os.Getenv("SPOTIFY_TOKEN_FILE")
 	if tokenFile == "" {
-		tokenFile = defaultTokenFile
+		tokenFile = spotify.DefaultTokenFile
 	}
+	spotify.SetTokenFile(tokenFile)
 
 	// Playlist ID from flag takes priority over env var
 	playlistID := *playlistFlag
@@ -77,24 +77,14 @@ func main() {
 	}
 
 	// Get API access token for server mode
-	apiAccessToken = os.Getenv("API_ACCESS_TOKEN")
+	apiAccessToken := os.Getenv("API_ACCESS_TOKEN")
 	if *serverMode && apiAccessToken == "" {
 		log.Fatal("API_ACCESS_TOKEN environment variable is required for server mode")
 	}
+	spotify.SetAPIAccessToken(apiAccessToken)
 
-	// Initialize the authenticator with required scopes
-	auth = spotifyauth.New(
-		spotifyauth.WithClientID(clientID),
-		spotifyauth.WithClientSecret(clientSecret),
-		spotifyauth.WithRedirectURL(redirectURI),
-		spotifyauth.WithScopes(
-			spotifyauth.ScopeUserReadPlaybackState,
-			spotifyauth.ScopeUserModifyPlaybackState,
-			spotifyauth.ScopeUserReadCurrentlyPlaying,
-			spotifyauth.ScopePlaylistReadPrivate,
-			spotifyauth.ScopePlaylistReadCollaborative,
-		),
-	)
+	// Initialize the authenticator
+	spotify.InitAuth(clientID, clientSecret, redirectURI)
 
 	// If --server flag is set, start HTTP API server
 	if *serverMode {
@@ -110,29 +100,29 @@ func main() {
 // In server mode, we try to load an existing token but don't require it.
 // Users can authenticate via /auth endpoint.
 func runServerMode() {
-	client, err := loadToken()
+	client, err := spotify.LoadToken()
 	if err == nil {
 		ctx := context.Background()
 		user, err := client.CurrentUser(ctx)
 		if err == nil {
 			fmt.Printf("Authenticated as: %s\n", user.DisplayName)
-			spotifyClient = client
+			spotify.SetClient(client)
 		} else {
 			fmt.Println("Existing token expired. Visit /auth to re-authenticate.")
 		}
 	} else {
 		fmt.Println("No Spotify token found. Visit /auth to authenticate.")
 	}
-	startAPIServer()
+	spotify.StartAPIServer()
 }
 
 // runCLIMode handles all command-line interface operations.
 func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, deviceName, playlistID string) {
 	// For CLI mode, require authentication
-	client, err := loadToken()
+	client, err := spotify.LoadToken()
 	if err != nil {
 		// No valid token, need to authenticate
-		client = authenticate()
+		client = spotify.Authenticate()
 	}
 
 	ctx := context.Background()
@@ -141,7 +131,7 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 	user, err := client.CurrentUser(ctx)
 	if err != nil {
 		log.Printf("Token may be expired, re-authenticating: %v", err)
-		client = authenticate()
+		client = spotify.Authenticate()
 		user, err = client.CurrentUser(ctx)
 		if err != nil {
 			log.Fatalf("Failed to get user info: %v", err)
@@ -151,7 +141,7 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 	fmt.Printf("Authenticated as: %s\n", user.DisplayName)
 
 	// Store client globally
-	spotifyClient = client
+	spotify.SetClient(client)
 
 	// Handle --playlists flag
 	if *listPlaylists {
@@ -161,7 +151,7 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 
 	// Handle --pause flag
 	if *pauseMode {
-		result, err := pausePlayback()
+		result, err := spotify.PausePlayback()
 		if err != nil {
 			log.Fatalf("Failed to pause: %v", err)
 		}
@@ -186,7 +176,7 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 
 	// Handle --devices flag
 	if *listDevices {
-		printDevicesTable(devices)
+		spotify.PrintDevicesTable(devices)
 		return
 	}
 
@@ -195,13 +185,13 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 }
 
 // handleListPlaylists fetches and displays all user playlists.
-func handleListPlaylists(ctx context.Context, client *spotify.Client, debug *bool) {
-	var allPlaylists []spotify.SimplePlaylist
+func handleListPlaylists(ctx context.Context, client *spotifyLib.Client, debug *bool) {
+	var allPlaylists []spotifyLib.SimplePlaylist
 	limit := 50
 	offset := 0
 
 	for {
-		playlists, err := client.CurrentUsersPlaylists(ctx, spotify.Limit(limit), spotify.Offset(offset))
+		playlists, err := client.CurrentUsersPlaylists(ctx, spotifyLib.Limit(limit), spotifyLib.Offset(offset))
 		if err != nil {
 			log.Fatalf("Failed to get playlists: %v", err)
 		}
@@ -218,13 +208,13 @@ func handleListPlaylists(ctx context.Context, client *spotify.Client, debug *boo
 		printDebugJSON("Playlist", allPlaylists)
 	}
 
-	printPlaylistsTable(allPlaylists)
+	spotify.PrintPlaylistsTable(allPlaylists)
 }
 
 // handlePlayPlaylist starts playback on the specified device.
-func handlePlayPlaylist(ctx context.Context, client *spotify.Client, devices []spotify.PlayerDevice, deviceName, playlistID string, shuffle *bool) {
+func handlePlayPlaylist(ctx context.Context, client *spotifyLib.Client, devices []spotifyLib.PlayerDevice, deviceName, playlistID string, shuffle *bool) {
 	// Find the target device by name or ID
-	var targetDevice *spotify.PlayerDevice
+	var targetDevice *spotifyLib.PlayerDevice
 	fmt.Println("\nAvailable devices:")
 	for i, device := range devices {
 		fmt.Printf("  %d. %s (%s) - Active: %v\n", i+1, device.Name, device.Type, device.Active)
@@ -253,22 +243,22 @@ func handlePlayPlaylist(ctx context.Context, client *spotify.Client, devices []s
 	}
 
 	// Resolve playlist by URL, name, or ID
-	resolvedPlaylistID, err := resolvePlaylistID(ctx, client, playlistID)
+	resolvedPlaylistID, err := spotify.ResolvePlaylistID(ctx, client, playlistID)
 	if err != nil {
 		log.Fatalf("Failed to resolve playlist: %v", err)
 	}
 
 	// Get playlist info
-	playlist, err := client.GetPlaylist(ctx, spotify.ID(resolvedPlaylistID))
+	playlist, err := client.GetPlaylist(ctx, spotifyLib.ID(resolvedPlaylistID))
 	if err != nil {
 		log.Fatalf("Failed to get playlist (ID: %s): %v\nMake sure the playlist ID is correct and the playlist is accessible.", resolvedPlaylistID, err)
 	}
 
 	trackCount := int(playlist.Tracks.Total)
-	playlistURI := spotify.URI("spotify:playlist:" + resolvedPlaylistID)
+	playlistURI := spotifyLib.URI("spotify:playlist:" + resolvedPlaylistID)
 
 	// Build play options
-	opts := &spotify.PlayOptions{
+	opts := &spotifyLib.PlayOptions{
 		DeviceID:        &targetDevice.ID,
 		PlaybackContext: &playlistURI,
 	}
@@ -276,7 +266,7 @@ func handlePlayPlaylist(ctx context.Context, client *spotify.Client, devices []s
 	// If shuffle is enabled, pick a random starting track
 	if *shuffle {
 		randomOffset := rand.Intn(trackCount)
-		offset := &spotify.PlaybackOffset{Position: &randomOffset}
+		offset := &spotifyLib.PlaybackOffset{Position: &randomOffset}
 		opts.PlaybackOffset = offset
 
 		err = client.PlayOpt(ctx, opts)
@@ -300,7 +290,7 @@ func handlePlayPlaylist(ctx context.Context, client *spotify.Client, devices []s
 	} else {
 		// Start from the beginning (track 1) without shuffle
 		startPosition := 0
-		opts.PlaybackOffset = &spotify.PlaybackOffset{Position: &startPosition}
+		opts.PlaybackOffset = &spotifyLib.PlaybackOffset{Position: &startPosition}
 
 		err = client.PlayOpt(ctx, opts)
 		if err != nil {

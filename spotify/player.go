@@ -1,12 +1,12 @@
 //
-// Date: 2025-12-09
+// Date: 2025-12-15
 // Author: Spicer Matthews <spicer@cloudmanic.com>
 // Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
 //
 // Description: Playback control functions for Spotify.
 //
 
-package main
+package spotify
 
 import (
 	"context"
@@ -15,12 +15,12 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/zmb3/spotify/v2"
+	spotifyLib "github.com/zmb3/spotify/v2"
 )
 
-// playPlaylist starts playback of a playlist on the specified device.
+// PlayPlaylist starts playback of a playlist on the specified device.
 // This function is used by both CLI and API server modes.
-func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error) {
+func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error) {
 	if spotifyClient == nil {
 		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
 	}
@@ -38,7 +38,7 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	}
 
 	// Find the target device
-	var targetDevice *spotify.PlayerDevice
+	var targetDevice *spotifyLib.PlayerDevice
 	for i, device := range devices {
 		if deviceName != "" && (device.Name == deviceName || string(device.ID) == deviceName) {
 			targetDevice = &devices[i]
@@ -60,22 +60,22 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	}
 
 	// Resolve playlist
-	playlistID, err := resolvePlaylistIDQuiet(ctx, spotifyClient, playlistInput)
+	playlistID, err := ResolvePlaylistIDQuiet(ctx, spotifyClient, playlistInput)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve playlist: %w", err)
 	}
 
 	// Get playlist info
-	playlist, err := spotifyClient.GetPlaylist(ctx, spotify.ID(playlistID))
+	playlist, err := spotifyClient.GetPlaylist(ctx, spotifyLib.ID(playlistID))
 	if err != nil {
 		return "", fmt.Errorf("failed to get playlist: %w", err)
 	}
 
 	trackCount := int(playlist.Tracks.Total)
-	playlistURI := spotify.URI("spotify:playlist:" + playlistID)
+	playlistURI := spotifyLib.URI("spotify:playlist:" + playlistID)
 
 	// Build play options
-	opts := &spotify.PlayOptions{
+	opts := &spotifyLib.PlayOptions{
 		DeviceID:        &targetDevice.ID,
 		PlaybackContext: &playlistURI,
 	}
@@ -83,7 +83,7 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	if shuffle {
 		// Pick random starting track
 		randomOffset := rand.Intn(trackCount)
-		opts.PlaybackOffset = &spotify.PlaybackOffset{Position: &randomOffset}
+		opts.PlaybackOffset = &spotifyLib.PlaybackOffset{Position: &randomOffset}
 
 		err = spotifyClient.PlayOpt(ctx, opts)
 		if err != nil {
@@ -105,7 +105,7 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 
 	// Start from track 1
 	startPosition := 0
-	opts.PlaybackOffset = &spotify.PlaybackOffset{Position: &startPosition}
+	opts.PlaybackOffset = &spotifyLib.PlaybackOffset{Position: &startPosition}
 
 	err = spotifyClient.PlayOpt(ctx, opts)
 	if err != nil {
@@ -115,9 +115,9 @@ func playPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	return fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name), nil
 }
 
-// pausePlayback pauses the current Spotify playback.
+// PausePlayback pauses the current Spotify playback.
 // This function is used by both CLI and API server modes.
-func pausePlayback() (string, error) {
+func PausePlayback() (string, error) {
 	if spotifyClient == nil {
 		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
 	}
