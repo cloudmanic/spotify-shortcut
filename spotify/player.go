@@ -211,6 +211,23 @@ func SetVolume(percent int, deviceName string) (string, error) {
 	return fmt.Sprintf("Volume set to %d%% on %s", percent, matchedName), nil
 }
 
+// SkipToNext advances playback to the next track in the current queue.
+// Targets whichever device is currently active in the user's session —
+// Spotify's API doesn't accept a device override here, so callers can't
+// skip "the bedroom speaker" when something else is the active device.
+// Premium-only.
+func SkipToNext() (string, error) {
+	if spotifyClient == nil {
+		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+
+	ctx := context.Background()
+	if err := spotifyClient.Next(ctx); err != nil {
+		return "", fmt.Errorf("failed to skip: %w", err)
+	}
+	return "Skipped to next track", nil
+}
+
 // PausePlayback pauses the current Spotify playback.
 // This function is used by both CLI and API server modes.
 func PausePlayback() (string, error) {

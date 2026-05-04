@@ -93,6 +93,17 @@ type MockSpotifyClient struct {
 	// device id passed without actually hitting Spotify.
 	VolumeFunc    func(ctx context.Context, percent int) error
 	VolumeOptFunc func(ctx context.Context, percent int, opt *spotifyLib.PlayOptions) error
+
+	// Next mock — invoked by SkipToNext.
+	NextFunc func(ctx context.Context) error
+}
+
+// Next forwards to the supplied func or no-ops.
+func (m *MockSpotifyClient) Next(ctx context.Context) error {
+	if m.NextFunc != nil {
+		return m.NextFunc(ctx)
+	}
+	return nil
 }
 
 // Token returns the current OAuth token, falling back to a stub for tests
@@ -1424,6 +1435,78 @@ func TestHandleLANDevicesRequest_Success(t *testing.T) {
 	}
 	if resp.Devices[0].Name != "Living Room Speakers" || resp.Devices[0].IP != "192.168.1.3" {
 		t.Errorf("unexpected first device: %+v", resp.Devices[0])
+	}
+}
+
+// TestHandleNextRequest_Success exercises the happy path: a valid token
+// triggers a Next() call on the underlying client.
+func TestHandleNextRequest_Success(t *testing.T) {
+	called := false
+	mock := &MockSpotifyClient{
+		NextFunc: func(ctx context.Context) error {
+			called = true
+			return nil
+		},
+	}
+	originalClient := spotifyClient
+	originalToken := apiAccessToken
+	spotifyClient = mock
+	apiAccessToken = "test-token"
+	defer func() {
+		spotifyClient = originalClient
+		apiAccessToken = originalToken
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/next?token=test-token", nil)
+	w := httptest.NewRecorder()
+	HandleNextRequest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !called {
+		t.Error("expected Next to be called")
+	}
+}
+
+// TestHandleNextRequest_Unauthorized rejects requests without the API token.
+func TestHandleNextRequest_Unauthorized(t *testing.T) {
+	originalToken := apiAccessToken
+	apiAccessToken = "test-token"
+	defer func() { apiAccessToken = originalToken }()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/next", nil)
+	w := httptest.NewRecorder()
+	HandleNextRequest(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// TestHandleNextRequest_SpotifyError surfaces the upstream error when
+// Spotify rejects the skip (e.g. nothing playing).
+func TestHandleNextRequest_SpotifyError(t *testing.T) {
+	mock := &MockSpotifyClient{
+		NextFunc: func(ctx context.Context) error {
+			return errors.New("nothing currently playing")
+		},
+	}
+	originalClient := spotifyClient
+	originalToken := apiAccessToken
+	spotifyClient = mock
+	apiAccessToken = "test-token"
+	defer func() {
+		spotifyClient = originalClient
+		apiAccessToken = originalToken
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/next?token=test-token", nil)
+	w := httptest.NewRecorder()
+	HandleNextRequest(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
 	}
 }
 

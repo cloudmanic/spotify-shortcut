@@ -32,6 +32,8 @@ type Client interface {
 	// specific device via PlayOptions.DeviceID. Used by /api/v1/volume
 	// when a device name is supplied.
 	VolumeOpt(ctx context.Context, percent int, opt *spotifyLib.PlayOptions) error
+	// Next skips to the next track in the current playback queue.
+	Next(ctx context.Context) error
 	// Token returns the current OAuth token, refreshing it if needed.
 	// We need the access token to push to Spotify Connect devices via the
 	// zeroconf addUser flow.

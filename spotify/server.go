@@ -67,11 +67,13 @@ func StartAPIServer() {
 	mux.HandleFunc("/api/v1/wake", HandleWakeRequest)
 	mux.HandleFunc("/api/v1/playlists", HandlePlaylistsRequest)
 	mux.HandleFunc("/api/v1/volume", HandleVolumeRequest)
+	mux.HandleFunc("/api/v1/next", HandleNextRequest)
 
 	fmt.Printf("Starting API server on port %s...\n", port)
 	fmt.Println("Endpoints:")
 	fmt.Println("  GET /api/v1/play?device=<name>&playlist=<name|id|url>&shuffle=<true|false>")
 	fmt.Println("  GET /api/v1/pause")
+	fmt.Println("  GET /api/v1/next")
 	fmt.Println("  GET /api/v1/devices")
 	fmt.Println("  GET /api/v1/lan-devices")
 	fmt.Println("  GET /api/v1/wake?device=<name>")
@@ -188,6 +190,33 @@ func HandlePlayRequest(w http.ResponseWriter, r *http.Request) {
 		Success: true,
 		Message: result,
 	})
+}
+
+// HandleNextRequest handles GET /api/v1/next, advancing the current
+// Spotify session to the next track. Targets whatever device is the
+// active session — Spotify's API doesn't allow specifying a device
+// for skip operations.
+func HandleNextRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+	if token != apiAccessToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(APIResponse{Success: false, Error: "Invalid or missing access token"})
+		return
+	}
+
+	msg, err := SkipToNext()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(APIResponse{Success: true, Message: msg})
 }
 
 // HandleVolumeRequest handles GET /api/v1/volume?level=0-100&device=<name>.
