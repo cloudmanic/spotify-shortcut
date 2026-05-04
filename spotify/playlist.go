@@ -129,6 +129,34 @@ func ResolvePlaylistIDQuiet(ctx context.Context, client Client, input string) (s
 	return input, nil
 }
 
+// ListPlaylists fetches every playlist owned/followed by the authenticated
+// user, paginating through Spotify's API. Used by the API server to expose
+// the full playlist catalog to clients (the iOS Shortcut, etc.) without
+// each client having to handle pagination itself.
+func ListPlaylists(ctx context.Context) ([]spotifyLib.SimplePlaylist, error) {
+	if spotifyClient == nil {
+		return nil, fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+
+	const pageSize = 50
+	var all []spotifyLib.SimplePlaylist
+	offset := 0
+
+	for {
+		page, err := spotifyClient.CurrentUsersPlaylists(ctx, spotifyLib.Limit(pageSize), spotifyLib.Offset(offset))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get playlists: %w", err)
+		}
+		all = append(all, page.Playlists...)
+		if len(page.Playlists) < pageSize {
+			break
+		}
+		offset += pageSize
+	}
+
+	return all, nil
+}
+
 // PrintPlaylistsTable displays the user's Spotify playlists in a formatted table.
 func PrintPlaylistsTable(playlists []spotifyLib.SimplePlaylist) {
 	green := color.New(color.FgGreen, color.Bold)

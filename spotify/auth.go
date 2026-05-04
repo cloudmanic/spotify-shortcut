@@ -34,6 +34,13 @@ func InitAuth(clientID, clientSecret, redirectURI string) {
 			spotifyauth.ScopeUserReadCurrentlyPlaying,
 			spotifyauth.ScopePlaylistReadPrivate,
 			spotifyauth.ScopePlaylistReadCollaborative,
+			// Streaming + email + private profile are required by the
+			// Spotify Connect eSDK on third-party speakers (e.g. WiiM)
+			// when we push our access token via the zeroconf addUser
+			// flow to claim a device for our account.
+			spotifyauth.ScopeStreaming,
+			spotifyauth.ScopeUserReadEmail,
+			spotifyauth.ScopeUserReadPrivate,
 		),
 	)
 }

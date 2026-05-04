@@ -33,11 +33,7 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		return "", fmt.Errorf("failed to get devices: %w", err)
 	}
 
-	if len(devices) == 0 {
-		return "", fmt.Errorf("no Spotify Connect devices found")
-	}
-
-	// Find the target device
+	// Find the target device in the existing cloud list.
 	var targetDevice *spotifyLib.PlayerDevice
 	for i, device := range devices {
 		if deviceName != "" && (device.Name == deviceName || string(device.ID) == deviceName) {
@@ -46,7 +42,36 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		}
 	}
 
-	// If no device specified or not found, use first active or first device
+	// If a specific device was requested but isn't in the cloud list, try
+	// to claim it via zeroconf. This is the multi-account-household path:
+	// another user previously linked this speaker to their account and we
+	// need to take it back.
+	if targetDevice == nil && deviceName != "" {
+		log.Printf("device %q not in Spotify cloud list, attempting zeroconf claim", deviceName)
+		claim, claimErr := ClaimDevice(ctx, deviceName)
+		if claimErr != nil {
+			return "", fmt.Errorf("device %q not available and zeroconf claim failed: %w", deviceName, claimErr)
+		}
+		log.Printf("claimed %q -> deviceID=%s", deviceName, claim.DeviceID)
+
+		// Re-fetch devices and find the now-registered one.
+		devices, err = spotifyClient.PlayerDevices(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh devices after claim: %w", err)
+		}
+		for i, device := range devices {
+			if string(device.ID) == claim.DeviceID {
+				targetDevice = &devices[i]
+				break
+			}
+		}
+	}
+
+	if targetDevice == nil && len(devices) == 0 {
+		return "", fmt.Errorf("no Spotify Connect devices found")
+	}
+
+	// If no device specified or still not found, fall back to first active or first device.
 	if targetDevice == nil {
 		for i, device := range devices {
 			if device.Active {
@@ -113,6 +138,77 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	}
 
 	return fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name), nil
+}
+
+// ListDevices returns the list of available Spotify Connect devices for the
+// authenticated user. Used by the API server to expose device discovery to
+// clients (e.g., the iOS Shortcut) so they can pick a target before calling
+// /api/v1/play.
+func ListDevices() ([]spotifyLib.PlayerDevice, error) {
+	if spotifyClient == nil {
+		return nil, fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+
+	ctx := context.Background()
+
+	devices, err := spotifyClient.PlayerDevices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	return devices, nil
+}
+
+// SetVolume sets the playback volume on a Spotify Connect device. If
+// `deviceName` is empty, the current active device is targeted. If a name
+// is supplied, we resolve it against the cloud devices list and pass the
+// ID to Spotify's volume API. `percent` must be 0-100.
+//
+// Spotify Premium is required for volume control — non-Premium accounts
+// will get a "Restriction violated" error from the upstream API.
+func SetVolume(percent int, deviceName string) (string, error) {
+	if spotifyClient == nil {
+		return "", fmt.Errorf("Spotify not authenticated. Visit /auth to authenticate")
+	}
+	if percent < 0 || percent > 100 {
+		return "", fmt.Errorf("level must be between 0 and 100, got %d", percent)
+	}
+
+	ctx := context.Background()
+
+	// No device specified — set on whatever's currently active.
+	if deviceName == "" {
+		if err := spotifyClient.Volume(ctx, percent); err != nil {
+			return "", fmt.Errorf("failed to set volume: %w", err)
+		}
+		return fmt.Sprintf("Volume set to %d%% on active device", percent), nil
+	}
+
+	// Device specified — resolve to an ID via the cloud devices list.
+	devices, err := spotifyClient.PlayerDevices(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	var targetID spotifyLib.ID
+	var matchedName string
+	for _, d := range devices {
+		if d.Name == deviceName || string(d.ID) == deviceName {
+			targetID = d.ID
+			matchedName = d.Name
+			break
+		}
+	}
+
+	if targetID == "" {
+		return "", fmt.Errorf("device %q not in Spotify cloud devices list — call /api/v1/wake first", deviceName)
+	}
+
+	opts := &spotifyLib.PlayOptions{DeviceID: &targetID}
+	if err := spotifyClient.VolumeOpt(ctx, percent, opts); err != nil {
+		return "", fmt.Errorf("failed to set volume on %s: %w", matchedName, err)
+	}
+	return fmt.Sprintf("Volume set to %d%% on %s", percent, matchedName), nil
 }
 
 // PausePlayback pauses the current Spotify playback.

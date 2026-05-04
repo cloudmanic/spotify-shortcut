@@ -1,299 +1,229 @@
 # Spotify Shortcut
 
-A Spotify proxy that makes voice assistant integrations simple. Control Spotify playback on any Spotify Connect device via HTTP requests—perfect for Apple Siri Shortcuts, Home Assistant, and other automation tools.
+An HTTP API that makes Spotify Connect speakers controllable from anything that can hit a URL — Siri Shortcuts, Stream Deck, cron, Home Assistant, your terminal, etc.
 
 ## Why This Exists
 
-Controlling Spotify on third-party speakers through Siri is frustrating. If you have whole-home audio with devices like [WiiM Amps](https://www.amazon.com/dp/B0CGCLXH4H) or other Spotify Connect receivers, you can't easily use Siri to start music on them. HomePods and AirPlay work great with Apple Music, but Spotify users are left with clunky workarounds.
+If you have whole-home audio with Spotify Connect speakers (WiiM amps, Sonos, etc.), Siri can't drive them directly. This server proxies playback control through Spotify's API, plus does the dirty work of **claiming back speakers that other household members have re-linked to their accounts** — without anyone needing to open the Spotify app.
 
-This app solves that problem by acting as a Spotify proxy:
+## How It Works
 
-1. **Deploy once** - Run the server on a Raspberry Pi, NAS, or cloud service
-2. **Create a Siri Shortcut** - Make a shortcut that sends an HTTP request to this app
-3. **Say "Hey Siri, play my playlist"** - Siri triggers the shortcut, which tells Spotify to play on your chosen speaker
-
-Because it's a simple HTTP API, you can use it with any automation platform—not just Siri. Stream Deck buttons, cron jobs, Home Assistant automations, or any system that can make HTTP requests.
+1. The server runs on a Mac on your home LAN (e.g. a spare mini, in our case named `stowe`).
+2. Clients hit `http://stowe:8080/api/v1/...` with a shared bearer token.
+3. For control endpoints (play / pause / volume), the server calls Spotify's Web API.
+4. For wake / auto-claim, the server uses **mDNS** to discover speakers on the LAN and the **Spotify Connect zeroconf addUser flow** to push our access token onto a target device — claiming it for our Spotify account regardless of who used it last.
 
 ## Features
 
-- Play any playlist by name, ID, or URL
-- Pause playback
-- Target specific Spotify Connect devices
-- Optional shuffle mode with random starting track
-- List available devices and playlists
-- Persistent OAuth token (authenticate once)
-- Environment variable and command-line flag configuration
-- **HTTP API server mode** for remote control and integrations
+- **Discover and claim Spotify Connect speakers on the LAN** — even ones currently linked to a different household member's account.
+- **Auto-claim during play** — `/api/v1/play?device=Pool+Speakers` claims the device first if it isn't already linked, then plays.
+- **List all speakers visible on the LAN** — beyond just what Spotify cloud reports.
+- **List, play, pause, volume control** — the basics, with simple JSON responses.
+- **Persistent OAuth token** — authenticate once, refresh automatically.
+- **CLI mode and HTTP server mode** — same binary.
 
 ## Prerequisites
 
-- Go 1.21 or later
-- A Spotify Premium account (required for playback control)
-- Spotify Developer credentials
+- Go 1.24+
+- Spotify Premium (volume control + playback transfer require Premium)
+- Spotify Developer credentials ([dashboard](https://developer.spotify.com/dashboard))
 
-## Spotify Developer Setup
+## Spotify App Setup
 
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Create a new application
-3. Add `http://127.0.0.1:8080/callback` to the Redirect URIs in your app settings
-4. Copy your Client ID and Client Secret
+1. Create an app at the Spotify Developer Dashboard.
+2. Add `http://127.0.0.1:8080/callback` to the **Redirect URIs**.
+3. Copy your Client ID and Client Secret into `.env`.
 
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/cloudmanic/spotify-shortcut.git
 cd spotify-shortcut
-
-# Install dependencies
 go mod tidy
-
-# Build the binary
-go build -o spotify-shortcut
+go build -o spotify-shortcut .
 ```
 
 ## Configuration
-
-Copy the sample environment file and add your credentials:
 
 ```bash
 cp .env.sample .env
 ```
 
-Edit `.env` with your Spotify credentials:
+Edit `.env`:
 
 ```bash
-# Required
-SPOTIFY_CLIENT_ID=your-client-id-here
-SPOTIFY_CLIENT_SECRET=your-client-secret-here
-
-# Optional defaults
-SPOTIFY_PLAYLIST_ID=your-default-playlist-id
-SPOTIFY_DEVICE_NAME=your-default-device-name
+SPOTIFY_CLIENT_ID=...
+SPOTIFY_CLIENT_SECRET=...
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:8080/callback
+SPOTIFY_TOKEN_FILE=.spotify_token.json
 
-# API Server mode (required for -server flag)
-API_ACCESS_TOKEN=your-secret-api-token-here
+# Required for server mode — generate via `openssl rand -hex 32`
+API_ACCESS_TOKEN=...
+
+# Optional
+SPOTIFY_PLAYLIST_ID=...
+SPOTIFY_DEVICE_NAME=...
 PORT=8080
 ```
 
-## Usage
+OAuth scopes the app requests:
 
-### First Run (Authentication)
+- `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`
+- `playlist-read-private`, `playlist-read-collaborative`
+- `streaming`, `user-read-email`, `user-read-private` — required by the Spotify Connect eSDK on third-party speakers when we push our access token via zeroconf
 
-On first run, the app will open a URL for Spotify authentication. Visit the URL in your browser and authorize the application. The token is saved locally for future use.
+## First Run / Authentication
 
-### Play a Playlist
-
-```bash
-# Play by playlist name
-./spotify-shortcut -playlist "My Favorite Songs"
-
-# Play by playlist ID
-./spotify-shortcut -playlist 37i9dQZF1DXcBWIGoYBM5M
-
-# Play by Spotify URL
-./spotify-shortcut -playlist "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
-```
-
-### Shuffle Mode
-
-```bash
-# Enable shuffle and start at a random track
-./spotify-shortcut -playlist "My Playlist" -shuffle
-```
-
-### Target a Specific Device
-
-```bash
-# Play on a specific device by name
-./spotify-shortcut -playlist "My Playlist" -device "Living Room Speaker"
-
-# Play on a specific device by ID
-./spotify-shortcut -playlist "My Playlist" -device "abc123deviceid"
-```
-
-### List Available Devices
+CLI mode triggers OAuth automatically:
 
 ```bash
 ./spotify-shortcut -devices
 ```
 
-### List Your Playlists
+A browser window opens to Spotify's consent page. After you approve, the token is saved to `.spotify_token.json` and reused on subsequent runs.
 
-```bash
-./spotify-shortcut -playlists
-```
+Server mode tries to load an existing token; if missing or invalid, it tells you to visit `/auth?token=<API_ACCESS_TOKEN>`.
 
-### Pause Playback
+## CLI Mode
 
-```bash
-# Pause music on all devices
-./spotify-shortcut -pause
-```
+| Flag | Description |
+|------|-------------|
+| `-playlist <name\|id\|url>` | Playlist to play |
+| `-device <name\|id>` | Speaker to play on |
+| `-shuffle` | Shuffle, starting at a random track |
+| `-pause` | Pause all playback |
+| `-devices` | List available Spotify Connect devices |
+| `-playlists` | List your playlists |
+| `-server` | Start the HTTP API server |
+| `-debug` | Print raw API responses |
 
-### Debug Mode
-
-```bash
-# Show raw API responses
-./spotify-shortcut -devices -debug
-./spotify-shortcut -playlists -debug
-```
-
-## Command-Line Flags
-
-| Flag         | Description                                     |
-| ------------ | ----------------------------------------------- |
-| `-playlist`  | Playlist name, ID, or URL to play               |
-| `-device`    | Device name or ID to play on                    |
-| `-shuffle`   | Enable shuffle mode and start at random track   |
-| `-pause`     | Pause playback on all devices                   |
-| `-devices`   | List available Spotify Connect devices and exit |
-| `-playlists` | List your Spotify playlists and exit            |
-| `-server`    | Start as HTTP API server                        |
-| `-debug`     | Print raw API responses for debugging           |
-
-## Examples
-
-```bash
-# Play "Chill Vibes" playlist on the kitchen speaker with shuffle
-./spotify-shortcut -playlist "Chill Vibes" -device "Kitchen" -shuffle
-
-# List all devices to find the correct name
-./spotify-shortcut -devices
-
-# List all playlists to find the correct name
-./spotify-shortcut -playlists
-
-# Play using environment variable defaults (set in .env)
-./spotify-shortcut
-```
-
-## API Server Mode
-
-Run the application as an HTTP API server for remote control and integrations:
+## Server Mode
 
 ```bash
 ./spotify-shortcut -server
 ```
 
-The server listens on the port specified by `PORT` (default: 8080).
-
-### Authentication
-
-All API requests require authentication via the `API_ACCESS_TOKEN`. You can provide the token in two ways:
-
-1. **Query parameter**: `?token=your-secret-token`
-2. **Authorization header**: `Authorization: Bearer your-secret-token`
+Serves on `:$PORT` (default 8080). All endpoints accept the API access token as a query param `?token=...` or `Authorization: Bearer ...` header.
 
 ### Endpoints
 
-#### GET /api/v1/play
+| Method & Path | Description |
+|---|---|
+| `GET /api/v1/play?device=&playlist=&shuffle=` | Start playback. Auto-claims the named device via zeroconf if it isn't already linked to your account. `playlist` accepts a name, ID, or URL. |
+| `GET /api/v1/pause` | Pause current playback. |
+| `GET /api/v1/volume?level=0-100&device=<optional>` | Set volume (Premium-only). Targets active device if `device` not given. |
+| `GET /api/v1/devices` | Spotify Connect devices currently linked to your account (cloud-side). |
+| `GET /api/v1/lan-devices` | Every Spotify Connect device discovered on the LAN via mDNS — including ones linked to other accounts. Use this to find the names you can pass to `/wake`. |
+| `GET /api/v1/wake?device=<name>` | Discover the named device via mDNS and run the zeroconf `addUser` handshake to claim it for your Spotify account. Idempotent. |
+| `GET /api/v1/playlists` | List every playlist owned/followed by the authenticated user. Server paginates. |
+| `GET /auth?token=<API_ACCESS_TOKEN>` | Kick off the OAuth flow (use after first deploy or whenever the token is invalidated). |
 
-Start playback of a playlist.
+### Response shape
 
-**Parameters:**
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `token` | Yes* | API access token (*or use Authorization header) |
-| `playlist` | Yes | Playlist name, ID, or URL |
-| `device` | No | Device name or ID (uses first active device if not specified) |
-| `shuffle` | No | `true` or `false` (default: false) |
+Most endpoints return `APIResponse`:
 
-**Example requests:**
-
-```bash
-# Using query parameter for token
-curl "http://localhost:8080/api/v1/play?token=your-token&playlist=Chill%20Vibes&shuffle=true"
-
-# Using Authorization header
-curl -H "Authorization: Bearer your-token" \
-  "http://localhost:8080/api/v1/play?playlist=Chill%20Vibes&device=Kitchen&shuffle=true"
+```json
+{ "success": true, "message": "...", "error": "..." }
 ```
 
-**Response:**
+`/devices`, `/lan-devices`, and `/playlists` extend this with a typed list under `devices` or `playlists`.
+
+### Examples
+
+```bash
+# Set up shorthand (assuming ~/.config/spotify-shortcut.json — see "Client config" below)
+URL=$(jq -r .server_url ~/.config/spotify-shortcut.json)
+TOK=$(jq -r .api_access_token ~/.config/spotify-shortcut.json)
+
+# What's on the LAN?
+curl -s "$URL/api/v1/lan-devices?token=$TOK" | jq '.devices[].name'
+
+# Wake the bedroom speakers (they were linked to someone else's account)
+curl -s "$URL/api/v1/wake?token=$TOK&device=Master+Bedroom+Speakers" | jq
+
+# Play a playlist
+curl -s "$URL/api/v1/play?token=$TOK&device=Living+Room+Speakers&playlist=Uplifting+Pop" | jq
+
+# Adjust volume
+curl -s "$URL/api/v1/volume?token=$TOK&level=40&device=Living+Room+Speakers" | jq
+
+# Stop everything
+curl -s "$URL/api/v1/pause?token=$TOK" | jq
+```
+
+## Client config (`~/.config/spotify-shortcut.json`)
+
+A small JSON file used by clients (curl shortcuts, the iOS Shortcut, etc.) so they don't have to hard-code the server URL or token:
 
 ```json
 {
-  "success": true,
-  "message": "Now playing \"Chill Vibes\" on Kitchen (shuffle enabled, starting at track 5 of 50)"
+  "api_access_token": "<same as API_ACCESS_TOKEN in .env>",
+  "server_url": "http://stowe:8080",
+  "speakers": [
+    "Living Room Speakers",
+    "Master Bedroom Speakers",
+    "Pool Porch Speakers",
+    "Pool Speakers",
+    "House Outdoor Speakers"
+  ]
 }
 ```
 
-**Error response:**
+The server itself does **not** read this file — it's a pure client convenience. The `speakers` list is just a curated list of friendly names for use in shortcut UIs.
 
-```json
-{
-  "success": false,
-  "error": "Invalid or missing access token"
-}
-```
+## Deployment
 
-#### GET /api/v1/pause
-
-Pause the current playback.
-
-**Parameters:**
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `token` | Yes* | API access token (*or use Authorization header) |
-
-**Example requests:**
+`scripts/deploy.sh` builds for `darwin/arm64`, ships the binary plus `.env` (and `.spotify_token.json` if present) to `deploy@stowe`, installs a launchd plist that auto-starts on reboot, and verifies it's running.
 
 ```bash
-# Using query parameter for token
-curl "http://localhost:8080/api/v1/pause?token=your-token"
-
-# Using Authorization header
-curl -H "Authorization: Bearer your-token" \
-  "http://localhost:8080/api/v1/pause"
+./scripts/deploy.sh
 ```
 
-**Response:**
+The launchd plist is written to `~deploy/Library/LaunchAgents/com.cloudmanic.spotify-shortcut.plist` and the binary lives at `~deploy/spotify-shortcut/`. Logs go to `~deploy/spotify-shortcut/server.{log,err}`.
 
-```json
-{
-  "success": true,
-  "message": "Playback paused"
-}
-```
+### One-time: macOS Sequoia Local Network permission
 
-## Automation
+macOS 15+ (Sequoia) blocks LAN multicast and unicast-to-LAN-IPs from launchd-managed processes that haven't been granted **Local Network** permission. Without it, `/api/v1/lan-devices` and `/api/v1/wake` will silently return zero results or "no route to host."
 
-This tool is designed for automation. Example use cases:
+Workarounds in this codebase:
 
-- **Home Assistant**: Trigger playlist playback with automations
-- **Cron jobs**: Schedule music at specific times
-- **Shell scripts**: Chain with other commands
-- **Stream Deck**: Quick playlist buttons
+- **Discovery (`/lan-devices`)** uses the system `dns-sd` tool on darwin — it talks to mDNSResponder over a Unix socket and is unaffected by the TCC gate.
+- **Outbound HTTP to LAN IPs (`/wake`)** still requires the permission. There's no Unix-socket workaround.
 
-### Example: Morning Alarm Script
+To grant it:
+
+1. Sign in to the deploy machine via Screen Sharing/VNC (or attach a monitor).
+2. Open Terminal and run `~/spotify-shortcut/spotify-shortcut -server`.
+3. macOS pops "spotify-shortcut would like to find devices on your local network" — click **Allow**.
+4. `Ctrl-C` to stop the foreground server.
+5. The launchd-managed copy now has permission too. Restart it:
+   ```bash
+   launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cloudmanic.spotify-shortcut.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cloudmanic.spotify-shortcut.plist
+   ```
+
+The permission persists per binary path. You only need to do this once unless the binary location changes.
+
+## Development
 
 ```bash
-#!/bin/bash
-./spotify-shortcut -playlist "Morning Energy" -device "Bedroom Speaker" -shuffle
+go test -v ./...   # full test suite
+go build ./...     # type/compile check
+go run . -server   # run locally on :8080
 ```
 
 ## Troubleshooting
 
-### "No Spotify Connect devices found"
+**`/api/v1/lan-devices` returns 0 devices in launchd context** → Local Network permission (see above).
 
-Make sure you have an active Spotify session on at least one device. Open Spotify on your phone, computer, or speaker before running the command.
+**`/api/v1/wake` returns "no route to host"** → Same root cause as above. The launchd-managed process can't reach `192.168.x.x`.
 
-### "Invalid redirect URI"
+**`/api/v1/play` returns "Restriction violated"** → Usually means there's no active Spotify session yet. Either nothing is playing anywhere, or the target device just got claimed and hasn't fully established a session. Hit it again, or play to an already-active device first to bootstrap.
 
-Ensure the redirect URI in your Spotify Developer Dashboard matches exactly: `http://127.0.0.1:8080/callback`
+**Newly-claimed device shows up with a hex ID instead of friendly name** → Cosmetic. Spotify cloud doesn't know the friendly name until the device completes its first playback session under your account. Both `/wake` and `/play` accept the hex ID, so functionality is unaffected.
 
-### "Resource not found" for playlist
-
-- Verify the playlist exists and is accessible to your account
-- Try using the playlist URL instead of the name
-- Use `-playlists` to see your available playlists
-
-### Token expired
-
-The app automatically refreshes tokens, but if authentication fails, delete `.spotify_token.json` and re-authenticate.
+**Token expired / invalid** → Delete `.spotify_token.json` on the deploy host and re-run the OAuth flow via `/auth?token=...`.
 
 ## License
 
-Copyright (c) 2025 Cloudmanic Labs, LLC. All rights reserved.
+Copyright (c) 2026 Cloudmanic Labs, LLC. All rights reserved.
