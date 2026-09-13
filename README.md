@@ -173,7 +173,7 @@ The server itself does **not** read this file — it's a pure client convenience
 
 ## Deployment
 
-`scripts/deploy.sh` builds for `darwin/arm64`, ships the binary plus `.env` (and `.spotify_token.json` if present) to `deploy@stowe`, installs a launchd plist that auto-starts on reboot, and verifies it's running.
+`scripts/deploy.sh` builds for `darwin/arm64`, ships the binary plus `.env` (and `.spotify_token.json` if present) to `spicer@stowe`, installs a launchd plist that auto-starts on reboot, and verifies it's running.
 
 ```bash
 ./scripts/deploy.sh

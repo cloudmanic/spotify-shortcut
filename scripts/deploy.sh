@@ -14,7 +14,9 @@
 #   scripts/deploy.sh
 #
 # Requirements:
-#   - SSH access to deploy@stowe with key auth (already configured).
+#   - SSH access to spicer@stowe with key auth (already configured).
+#   - spicer logged in on stowe's screen. The service is a LaunchAgent, so
+#     it only runs while that user has a login session.
 #   - Working .env locally with SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
 #     API_ACCESS_TOKEN.
 #
@@ -23,7 +25,7 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-REMOTE_USER="deploy"
+REMOTE_USER="spicer"
 REMOTE_HOST="stowe"
 REMOTE="${REMOTE_USER}@${REMOTE_HOST}"
 REMOTE_HOME="/Users/${REMOTE_USER}"

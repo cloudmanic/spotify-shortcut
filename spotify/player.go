@@ -71,6 +71,12 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		return "", fmt.Errorf("no Spotify Connect devices found")
 	}
 
+	// fellBackFromRequest tracks whether we ended up on a different device
+	// than the caller asked for. When true, the success response is
+	// annotated so callers can detect the mismatch instead of trusting
+	// a generic "Now playing on X" message.
+	fellBackFromRequest := false
+
 	// If no device specified or still not found, fall back to first active or first device.
 	if targetDevice == nil {
 		for i, device := range devices {
@@ -81,6 +87,15 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		}
 		if targetDevice == nil {
 			targetDevice = &devices[0]
+		}
+
+		// Log when a specific device was requested but playback went to a
+		// different one, so the mismatch shows up in the server log and not
+		// only in the response body.
+		if deviceName != "" {
+			fellBackFromRequest = true
+			log.Printf("WARNING: requested device %q not found and claim failed; falling back to %s (active=%v)",
+				deviceName, targetDevice.Name, targetDevice.Active)
 		}
 	}
 
@@ -124,8 +139,12 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 			log.Printf("Warning: Failed to enable shuffle: %v", err)
 		}
 
-		return fmt.Sprintf("Now playing \"%s\" on %s (shuffle enabled, starting at track %d of %d)",
-			playlist.Name, targetDevice.Name, randomOffset+1, trackCount), nil
+		msg := fmt.Sprintf("Now playing \"%s\" on %s (shuffle enabled, starting at track %d of %d)",
+			playlist.Name, targetDevice.Name, randomOffset+1, trackCount)
+		if fellBackFromRequest {
+			msg += fmt.Sprintf(" — note: requested device %q was unavailable, fell back to %s", deviceName, targetDevice.Name)
+		}
+		return msg, nil
 	}
 
 	// Start from track 1
@@ -137,7 +156,11 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		return "", fmt.Errorf("failed to start playback: %w", err)
 	}
 
-	return fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name), nil
+	msg := fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name)
+	if fellBackFromRequest {
+		msg += fmt.Sprintf(" — note: requested device %q was unavailable, fell back to %s", deviceName, targetDevice.Name)
+	}
+	return msg, nil
 }
 
 // ListDevices returns the list of available Spotify Connect devices for the

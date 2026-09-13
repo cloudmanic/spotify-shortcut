@@ -259,6 +259,17 @@ func (c *DiscoveryCache) Devices(ctx context.Context) ([]LocalDevice, error) {
 	return c.devices, nil
 }
 
+// Invalidate forces the next call to Devices to re-run mDNS discovery
+// instead of returning a cached result. Used by retry paths (e.g. claim
+// retry after a transient failure) so they don't keep hitting the same
+// stale empty cache that caused the first failure.
+func (c *DiscoveryCache) Invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.devices = nil
+	c.expiresAt = time.Time{}
+}
+
 // FindByName looks up a discovered device by its friendly name (case
 // insensitive). Returns the matched device and true on hit. Falls back to
 // matching the raw hostname or instance name if the friendly name doesn't

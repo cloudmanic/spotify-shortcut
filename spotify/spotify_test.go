@@ -1189,6 +1189,37 @@ func TestDiscoveryCache_DiscoveryError(t *testing.T) {
 	}
 }
 
+// TestDiscoveryCache_Invalidate verifies Invalidate forces the next Devices
+// call to re-browse mDNS instead of serving the previously-cached list.
+// This is the contract the claim-retry path depends on: when a claim fails
+// because the LAN cache held a stale empty (or wrong) result, retrying after
+// Invalidate must actually re-query the network.
+func TestDiscoveryCache_Invalidate(t *testing.T) {
+	fake := &fakeDiscoverer{
+		devices: []LocalDevice{
+			{InstanceName: "FF98", Hostname: "Living-Room-Speakers.local.", FriendlyName: "Living Room Speakers", IP: "192.168.1.3", Port: 5356},
+		},
+	}
+	cache := NewDiscoveryCache(fake, time.Minute)
+	ctx := context.Background()
+
+	if _, err := cache.Devices(ctx); err != nil {
+		t.Fatalf("first Devices: %v", err)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("expected 1 mDNS call before invalidate, got %d", fake.calls)
+	}
+
+	cache.Invalidate()
+
+	if _, err := cache.Devices(ctx); err != nil {
+		t.Fatalf("post-invalidate Devices: %v", err)
+	}
+	if fake.calls != 2 {
+		t.Errorf("expected 2 mDNS calls after invalidate, got %d", fake.calls)
+	}
+}
+
 // TestZeroconfClient_GetInfo_AndAddUser_AccessTokenPath spins up an httptest
 // server impersonating a WiiM-style Spotify Connect device that advertises
 // tokenType=accesstoken. It verifies the client sends the unencrypted

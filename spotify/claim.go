@@ -14,9 +14,24 @@ package spotify
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
+
+// claimMaxAttempts is the total number of times ClaimDevice will attempt
+// the LAN discovery + zeroconf handshake + cloud-registration sequence
+// before giving up. Two attempts handles the common transient cases:
+// mDNS first-browse misses, the device taking an extra beat to respond
+// to the addUser POST, or Spotify cloud being slow to register a
+// freshly-claimed device on the first try.
+const claimMaxAttempts = 2
+
+// claimRetryBackoff is how long ClaimDevice waits between attempts. Kept
+// short because the device is already known to be online (the user just
+// asked to play to it) — we just need to give the LAN/cloud a moment to
+// settle before re-running the full handshake.
+const claimRetryBackoff = 2 * time.Second
 
 // ClaimResult summarizes the outcome of a ClaimDevice call. We return the
 // resolved LocalDevice so callers can log details (IP, hostname) and the
@@ -51,6 +66,45 @@ func ClaimDevice(ctx context.Context, deviceName string) (*ClaimResult, error) {
 		return &ClaimResult{DeviceID: string(existing.ID), AlreadyActive: true}, nil
 	}
 
+	// Retry the full claim sequence on transient failures. The most common
+	// failure modes (first mDNS browse misses the device, addUser POST
+	// times out, or cloud registration lags past the wait window) all clear
+	// up on a second try after a short pause. Invalidating the discovery
+	// cache between attempts ensures we re-browse the LAN instead of
+	// reusing a stale empty result.
+	var lastErr error
+	for attempt := 1; attempt <= claimMaxAttempts; attempt++ {
+		result, err := claimDeviceOnce(ctx, deviceName)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("claim of %q succeeded on attempt %d", deviceName, attempt)
+			}
+			return result, nil
+		}
+		lastErr = err
+
+		if attempt == claimMaxAttempts {
+			break
+		}
+
+		log.Printf("claim of %q failed on attempt %d/%d: %v — retrying", deviceName, attempt, claimMaxAttempts, err)
+		defaultDiscoveryCache.Invalidate()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(claimRetryBackoff):
+		}
+	}
+
+	return nil, lastErr
+}
+
+// claimDeviceOnce performs a single attempt at the LAN discovery →
+// zeroconf addUser → cloud-registration sequence. ClaimDevice wraps this
+// in a retry loop. Splitting it out keeps the orchestration logic above
+// short and lets the inner steps fail fast without per-step retry logic.
+func claimDeviceOnce(ctx context.Context, deviceName string) (*ClaimResult, error) {
 	// Resolve the local IP/port via mDNS.
 	local, found, err := defaultDiscoveryCache.FindByName(ctx, deviceName)
 	if err != nil {
