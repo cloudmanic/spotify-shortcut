@@ -36,7 +36,7 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	// Find the target device in the existing cloud list.
 	var targetDevice *spotifyLib.PlayerDevice
 	for i, device := range devices {
-		if deviceName != "" && (device.Name == deviceName || string(device.ID) == deviceName) {
+		if deviceMatches(device, deviceName) {
 			targetDevice = &devices[i]
 			break
 		}
@@ -121,8 +121,12 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 	}
 
 	if shuffle {
-		// Pick random starting track
-		randomOffset := rand.Intn(trackCount)
+		// Pick random starting track. Spotify can report a total of 0 for
+		// playlists we don't own, and rand.Intn(0) panics.
+		randomOffset := 0
+		if trackCount > 0 {
+			randomOffset = rand.Intn(trackCount)
+		}
 		opts.PlaybackOffset = &spotifyLib.PlaybackOffset{Position: &randomOffset}
 
 		err = spotifyClient.PlayOpt(ctx, opts)
@@ -140,7 +144,7 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		}
 
 		msg := fmt.Sprintf("Now playing \"%s\" on %s (shuffle enabled, starting at track %d of %d)",
-			playlist.Name, targetDevice.Name, randomOffset+1, trackCount)
+			playlist.Name, deviceDisplayName(*targetDevice), randomOffset+1, trackCount)
 		if fellBackFromRequest {
 			msg += fmt.Sprintf(" — note: requested device %q was unavailable, fell back to %s", deviceName, targetDevice.Name)
 		}
@@ -156,7 +160,7 @@ func PlayPlaylist(deviceName, playlistInput string, shuffle bool) (string, error
 		return "", fmt.Errorf("failed to start playback: %w", err)
 	}
 
-	msg := fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, targetDevice.Name)
+	msg := fmt.Sprintf("Now playing \"%s\" on %s (starting at track 1)", playlist.Name, deviceDisplayName(*targetDevice))
 	if fellBackFromRequest {
 		msg += fmt.Sprintf(" — note: requested device %q was unavailable, fell back to %s", deviceName, targetDevice.Name)
 	}
@@ -216,9 +220,9 @@ func SetVolume(percent int, deviceName string) (string, error) {
 	var targetID spotifyLib.ID
 	var matchedName string
 	for _, d := range devices {
-		if d.Name == deviceName || string(d.ID) == deviceName {
+		if deviceMatches(d, deviceName) {
 			targetID = d.ID
-			matchedName = d.Name
+			matchedName = deviceDisplayName(d)
 			break
 		}
 	}

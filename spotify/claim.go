@@ -150,16 +150,17 @@ func claimDeviceOnce(ctx context.Context, deviceName string) (*ClaimResult, erro
 }
 
 // findCloudDevice looks up a device in the Spotify cloud devices list by
-// either its friendly name or its hex device ID. Returns a copy of the
-// matched device and true on hit.
+// its friendly name or its hex device ID. The speaker directory supplies
+// the friendly name when Spotify lists the device by ID only, so an
+// already-linked speaker is found without re-running the claim handshake.
 func findCloudDevice(ctx context.Context, target string) (PlayerDeviceLite, bool) {
 	devices, err := spotifyClient.PlayerDevices(ctx)
 	if err != nil {
 		return PlayerDeviceLite{}, false
 	}
 	for _, d := range devices {
-		if strings.EqualFold(d.Name, target) || strings.EqualFold(string(d.ID), target) {
-			return PlayerDeviceLite{ID: string(d.ID), Name: d.Name}, true
+		if deviceMatches(d, target) {
+			return PlayerDeviceLite{ID: string(d.ID), Name: deviceDisplayName(d)}, true
 		}
 	}
 	return PlayerDeviceLite{}, false
