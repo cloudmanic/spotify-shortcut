@@ -12,6 +12,7 @@ If you have whole-home audio with Spotify Connect speakers (WiiM amps, Sonos, et
 2. Clients hit `http://stowe:8080/api/v1/...` with a shared bearer token.
 3. For control endpoints (play / pause / volume), the server calls Spotify's Web API.
 4. For wake / auto-claim, the server uses **mDNS** to discover speakers on the LAN and the **Spotify Connect zeroconf addUser flow** to push our access token onto a target device — claiming it for our Spotify account regardless of who used it last.
+5. For `/api/v1/ask`, the server sends the spoken sentence to [Jev](https://docs.typesafe.ai/introduction), a fast decision model from TypeSafe, to work out what to do, then acts and returns a sentence to read back.
 
 ## Features
 
@@ -19,6 +20,8 @@ If you have whole-home audio with Spotify Connect speakers (WiiM amps, Sonos, et
 - **Auto-claim during play** — `/api/v1/play?device=Pool+Speakers` claims the device first if it isn't already linked, then plays.
 - **List all speakers visible on the LAN** — beyond just what Spotify cloud reports.
 - **List, play, pause, volume control** — the basics, with simple JSON responses.
+- **Plain-English requests** — `/api/v1/ask?text=play green day in the master bedroom` plays an artist, album, song, genre or playlist, stops music everywhere, pauses, skips, changes volume, and says what's playing where.
+- **Speaker names, not hex IDs** — each speaker reports its Spotify device ID, so the server shows "Pool Speakers" where Spotify shows `3b116b85…`.
 - **Persistent OAuth token** — authenticate once, refresh automatically.
 - **CLI mode and HTTP server mode** — same binary.
 
@@ -60,10 +63,14 @@ SPOTIFY_TOKEN_FILE=.spotify_token.json
 # Required for server mode — generate via `openssl rand -hex 32`
 API_ACCESS_TOKEN=...
 
+# Required for /api/v1/ask and -ask — from the TypeSafe console (1Password: "typesafe.ai API Key (Jev)")
+TYPESAFE_API_KEY=...
+
 # Optional
 SPOTIFY_PLAYLIST_ID=...
 SPOTIFY_DEVICE_NAME=...
 PORT=8080
+TYPESAFE_MODEL=jev-1.13.0
 ```
 
 OAuth scopes the app requests:
@@ -95,6 +102,8 @@ Server mode tries to load an existing token; if missing or invalid, it tells you
 | `-devices` | List available Spotify Connect devices |
 | `-playlists` | List your playlists |
 | `-server` | Start the HTTP API server |
+| `-ask "<request>"` | Run one plain-English request, e.g. `-ask "what's playing?"` |
+| `-dry-run` | With `-ask`: decide what to do but change nothing |
 | `-debug` | Print raw API responses |
 
 ## Server Mode
@@ -116,6 +125,7 @@ Serves on `:$PORT` (default 8080). All endpoints accept the API access token as 
 | `GET /api/v1/lan-devices` | Every Spotify Connect device discovered on the LAN via mDNS — including ones linked to other accounts. Use this to find the names you can pass to `/wake`. |
 | `GET /api/v1/wake?device=<name>` | Discover the named device via mDNS and run the zeroconf `addUser` handshake to claim it for your Spotify account. Idempotent. |
 | `GET /api/v1/playlists` | List every playlist owned/followed by the authenticated user. Server paginates. |
+| `GET\|POST /api/v1/ask?text=<request>&dry_run=<true\|false>` | Do whatever a plain-English request asks (see below). POST takes `{"text": "...", "dry_run": false}`. |
 | `GET /auth?token=<API_ACCESS_TOKEN>` | Kick off the OAuth flow (use after first deploy or whenever the token is invalidated). |
 
 ### Response shape
@@ -127,6 +137,32 @@ Most endpoints return `APIResponse`:
 ```
 
 `/devices`, `/lan-devices`, and `/playlists` extend this with a typed list under `devices` or `playlists`.
+
+### `/api/v1/ask`
+
+Send a sentence; get back a sentence to read aloud and whether anything was done:
+
+```json
+{ "action_taken": true, "message": "Playing Green Day on Master Bedroom Speakers.", "intent": "play" }
+```
+
+`action_taken` is `false` when nothing was done — for example "I can't play Less Than Jake because you didn't say which speaker.", "Did you mean Pool Speakers or Pool Porch Speakers?", or "Nothing is playing right now." With `dry_run=true` it decides everything (including which Spotify item it would play) but changes nothing, and the message starts with `Dry run:`.
+
+What it understands:
+
+| Ask | What happens |
+|---|---|
+| "Play my coding mix on the living room speakers" | Plays your playlist from track one. Say "shuffle" to shuffle. |
+| "Play Green Day in the master bedroom" | Plays the artist. Albums, songs ("the Goldfinger version of 99 Red Balloons"), "the latest … album" and genres ("some jazz") work too. |
+| "Kill all music" / "Stop all the music" | Pauses every speaker that's playing, whichever account or app started it. |
+| "Pause the music" / "Resume" / "Skip this song" | Acts on the speaker that's playing; name a speaker if several are. |
+| "Turn it up" / "Turn down the pool speakers" / "Volume 40 in the living room" | Moves volume by 10, or sets a number. |
+| "What's playing right now?" | Lists each speaker that's playing and the song. |
+| "What are my playlists?" / "What are my possible speakers?" | Lists them. |
+
+How it decides: one Jev call asks every question at once (what to do, which speaker, what kind of music, which words are the artist or song). Jev can only pick from options it is given, so the server offers it every short run of words from the sentence to pick names from, and a second Jev call picks the right Spotify search result. Dates (newest album) and numbers (volume) are handled in code. When Jev isn't sure — say, between two similar speaker names — the server asks instead of guessing.
+
+Stop, pause, skip, volume and "what's playing" talk to WiiM speakers directly over their local HTTPS API, because Spotify's API only sees playback on our own account. Known speakers are saved to `.speakers.json` and re-checked at their last address each minute, so one missed mDNS scan doesn't lose them.
 
 ### Examples
 
@@ -149,6 +185,9 @@ curl -s "$URL/api/v1/volume?token=$TOK&level=40&device=Living+Room+Speakers" | j
 
 # Stop everything
 curl -s "$URL/api/v1/pause?token=$TOK" | jq
+
+# Say it in plain English
+curl -s -G "$URL/api/v1/ask" --data-urlencode "token=$TOK" --data-urlencode "text=play green day in the master bedroom" | jq
 ```
 
 ## Client config (`~/.config/spotify-shortcut.json`)

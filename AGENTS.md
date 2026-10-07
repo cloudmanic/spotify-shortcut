@@ -49,6 +49,12 @@ All tests must pass before committing.
   - `zeroconf.go` — Spotify Connect zeroconf protocol client (getInfo + addUser)
   - `claim.go` — high-level "claim a device for our account" orchestration
   - `types.go` — shared types and the `Client` interface used for mocking
+  - `ask.go` — `/api/v1/ask` text-to-action: Jev questions, decisions, reply sentences
+  - `jev.go` — TypeSafe Jev client (choice and yes/no questions)
+  - `catalog.go` — Spotify search, Jev picking the right result, newest release, play on a named speaker
+  - `control.go` — what's playing where, stop everywhere, pause/resume/skip/volume
+  - `speakers.go` — speaker directory: friendly name ↔ Spotify device ID ↔ LAN IP, saved to `.speakers.json`
+  - `wiim.go` — WiiM (LinkPlay) local HTTPS API client
 - `scripts/deploy.sh` — builds and deploys to `spicer@stowe`
 
 ## Deployment
@@ -84,6 +90,17 @@ If you're debugging a "device returns status 101 OK but doesn't actually log in"
 
 Multiple Spotify accounts in the same house cause speakers to get re-linked frequently — whoever played last "owns" the speaker. The auto-claim path in `/api/v1/play` handles this transparently: if the named device isn't in our cloud devices list, it runs the zeroconf claim before transferring playback. Single OAuth blob in `.env`/`.spotify_token.json` is enough; only the user running this app needs to re-claim — other family members continue to use their phones normally.
 
+## /api/v1/ask and Jev
+
+`/api/v1/ask` turns a sentence into an action using TypeSafe's Jev model (`TYPESAFE_API_KEY`). Jev only answers typed questions (pick one option, or yes/no) and cannot write text, so:
+
+- Names (artist, song, album, genre) are picked from every 1–6 word run of the sentence.
+- Spotify search results are matched by a second Jev choice with a NONE option.
+- Dates and numbers stay in code.
+- Thresholds in `ask.go` are tuned against the pinned model `jev-1.13.0`. Re-check them with real sentences (`-ask "..." -dry-run`) before moving to a newer model.
+
+Spotify's API only sees our own account's playback, so stop/pause/skip/volume/now-playing use each WiiM speaker's local API (`wiim.go`) for anything not on our session.
+
 ## Friendly-name vs hex-ID quirk
 
-Newly-claimed devices appear in `/me/player/devices` (and our `/api/v1/devices`) with their raw hex `deviceID` instead of their friendly name until they actually complete a first playback session. Spotify cloud caches the friendly name only after the eSDK reports it post-session. Both `/wake` and `/play` accept either name or ID, so this is cosmetic — but worth knowing when it shows up in test output.
+Newly-claimed devices appear in `/me/player/devices` (and our `/api/v1/devices`) with their raw hex `deviceID` instead of their friendly name until they actually complete a first playback session. Spotify cloud caches the friendly name only after the eSDK reports it post-session. Each speaker's zeroconf `getInfo` reports the same hex ID, so the speaker directory (`speakers.go`) maps it back to the friendly name for `/devices`, `/play`, `/volume` and `/ask`. Both `/wake` and `/play` accept either name or ID.

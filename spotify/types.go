@@ -34,6 +34,17 @@ type Client interface {
 	VolumeOpt(ctx context.Context, percent int, opt *spotifyLib.PlayOptions) error
 	// Next skips to the next track in the current playback queue.
 	Next(ctx context.Context) error
+	// NextOpt, PauseOpt and ShuffleOpt act on a specific device via
+	// PlayOptions.DeviceID instead of the active one.
+	NextOpt(ctx context.Context, opt *spotifyLib.PlayOptions) error
+	PauseOpt(ctx context.Context, opt *spotifyLib.PlayOptions) error
+	ShuffleOpt(ctx context.Context, shuffle bool, opt *spotifyLib.PlayOptions) error
+	// PlayerState reports what our account is playing and on which device.
+	PlayerState(ctx context.Context, opts ...spotifyLib.RequestOption) (*spotifyLib.PlayerState, error)
+	// Search finds tracks, artists, albums or playlists in Spotify's catalog.
+	Search(ctx context.Context, query string, t spotifyLib.SearchType, opts ...spotifyLib.RequestOption) (*spotifyLib.SearchResult, error)
+	// GetArtistAlbums lists an artist's releases, used to find the newest one.
+	GetArtistAlbums(ctx context.Context, artistID spotifyLib.ID, ts []spotifyLib.AlbumType, opts ...spotifyLib.RequestOption) (*spotifyLib.SimpleAlbumPage, error)
 	// Token returns the current OAuth token, refreshing it if needed.
 	// We need the access token to push to Spotify Connect devices via the
 	// zeroconf addUser flow.
@@ -42,10 +53,10 @@ type Client interface {
 
 // APIResponse represents a standard JSON response for the API.
 type APIResponse struct {
-	Success bool          `json:"success"`
-	Message string        `json:"message,omitempty"`
-	Error   string        `json:"error,omitempty"`
-	Devices []DeviceInfo  `json:"devices,omitempty"`
+	Success bool         `json:"success"`
+	Message string       `json:"message,omitempty"`
+	Error   string       `json:"error,omitempty"`
+	Devices []DeviceInfo `json:"devices,omitempty"`
 }
 
 // DeviceInfo is the JSON-friendly subset of a Spotify Connect device returned
@@ -94,4 +105,15 @@ type PlaylistsResponse struct {
 	Message   string         `json:"message,omitempty"`
 	Error     string         `json:"error,omitempty"`
 	Playlists []PlaylistInfo `json:"playlists"`
+}
+
+// AskResponse is the shape returned by /api/v1/ask. Message is a sentence
+// meant to be read aloud; ActionTaken is false whenever nothing was done,
+// for example when the request named no speaker.
+type AskResponse struct {
+	ActionTaken bool   `json:"action_taken"`
+	Message     string `json:"message"`
+	Intent      string `json:"intent,omitempty"`
+	DryRun      bool   `json:"dry_run,omitempty"`
+	Error       string `json:"error,omitempty"`
 }

@@ -4,6 +4,9 @@
 # OAuth token cache
 .spotify_token.json
 
+# Saved speaker directory
+.speakers.json
+
 # Build output
 spotify-shortcut
 spotify-shortcut.exe

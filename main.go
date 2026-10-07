@@ -36,6 +36,8 @@ func main() {
 	playlistFlag := flag.String("playlist", "", "Playlist ID or URL to play")
 	serverMode := flag.Bool("server", false, "Start as HTTP API server")
 	pauseMode := flag.Bool("pause", false, "Pause playback on all devices")
+	askText := flag.String("ask", "", "Run one spoken request (e.g. \"play my coding mix in the living room\") and exit")
+	dryRun := flag.Bool("dry-run", false, "With -ask: decide what to do but don't do it")
 	flag.Parse()
 
 	// Load .env file if it exists (ignore error if not found)
@@ -71,8 +73,8 @@ func main() {
 		log.Fatal("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables are required")
 	}
 
-	// Only require playlist ID if not listing devices, playlists, pausing, or running in server mode
-	if playlistID == "" && !*listDevices && !*listPlaylists && !*serverMode && !*pauseMode {
+	// Only require playlist ID if not listing devices, playlists, pausing, asking, or running in server mode
+	if playlistID == "" && !*listDevices && !*listPlaylists && !*serverMode && !*pauseMode && *askText == "" {
 		log.Fatal("SPOTIFY_PLAYLIST_ID is required. Use -playlist flag or set in .env")
 	}
 
@@ -82,6 +84,14 @@ func main() {
 		log.Fatal("API_ACCESS_TOKEN environment variable is required for server mode")
 	}
 	spotify.SetAPIAccessToken(apiAccessToken)
+
+	// Jev powers /api/v1/ask and -ask; everything else works without it.
+	if key := os.Getenv("TYPESAFE_API_KEY"); key != "" {
+		spotify.SetJevClient(spotify.NewJevClient(key, os.Getenv("TYPESAFE_MODEL")))
+	}
+
+	// Remember speakers between runs so a missed LAN scan doesn't lose them.
+	spotify.EnableSpeakerCache(spotify.DefaultSpeakerCacheFile)
 
 	// Initialize the authenticator
 	spotify.InitAuth(clientID, clientSecret, redirectURI)
@@ -93,7 +103,7 @@ func main() {
 	}
 
 	// Run CLI mode
-	runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode, deviceName, playlistID)
+	runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode, deviceName, playlistID, *askText, *dryRun)
 }
 
 // runServerMode starts the HTTP API server.
@@ -117,7 +127,7 @@ func runServerMode() {
 }
 
 // runCLIMode handles all command-line interface operations.
-func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, deviceName, playlistID string) {
+func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, deviceName, playlistID, askText string, dryRun bool) {
 	// For CLI mode, require authentication
 	client, err := spotify.LoadToken()
 	if err != nil {
@@ -146,6 +156,12 @@ func runCLIMode(listDevices, listPlaylists, debug, shuffle, pauseMode *bool, dev
 	// Handle --playlists flag
 	if *listPlaylists {
 		handleListPlaylists(ctx, client, debug)
+		return
+	}
+
+	// Handle --ask flag
+	if askText != "" {
+		handleAsk(ctx, askText, dryRun)
 		return
 	}
 
@@ -298,6 +314,26 @@ func handlePlayPlaylist(ctx context.Context, client *spotifyLib.Client, devices 
 		}
 
 		fmt.Printf("Now playing playlist \"%s\" on %s (starting at track 1)\n", playlist.Name, targetDevice.Name)
+	}
+}
+
+// handleAsk runs one spoken request through the same path as
+// /api/v1/ask and prints the JSON response.
+func handleAsk(ctx context.Context, text string, dryRun bool) {
+	res, err := spotify.Ask(ctx, text, dryRun)
+	out := spotify.AskResponse{
+		ActionTaken: res.ActionTaken,
+		Message:     res.Message,
+		Intent:      res.Intent,
+		DryRun:      dryRun,
+	}
+	if err != nil {
+		out.Error = err.Error()
+	}
+	raw, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(raw))
+	if err != nil {
+		os.Exit(1)
 	}
 }
 

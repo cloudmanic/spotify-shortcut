@@ -9,6 +9,7 @@
 package spotify
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -68,6 +69,10 @@ func StartAPIServer() {
 	mux.HandleFunc("/api/v1/playlists", HandlePlaylistsRequest)
 	mux.HandleFunc("/api/v1/volume", HandleVolumeRequest)
 	mux.HandleFunc("/api/v1/next", HandleNextRequest)
+	mux.HandleFunc("/api/v1/ask", HandleAskRequest)
+
+	// Keep the speaker list warm so spoken requests never wait on a LAN scan.
+	go speakerDirectory.Run(context.Background(), speakerRefreshInterval)
 
 	fmt.Printf("Starting API server on port %s...\n", port)
 	fmt.Println("Endpoints:")
@@ -79,6 +84,7 @@ func StartAPIServer() {
 	fmt.Println("  GET /api/v1/wake?device=<name>")
 	fmt.Println("  GET /api/v1/playlists")
 	fmt.Println("  GET /api/v1/volume?level=0-100&device=<optional name>")
+	fmt.Println("  GET|POST /api/v1/ask?text=<spoken request>&dry_run=<true|false>")
 
 	// Wrap mux with logging middleware
 	handler := loggingMiddleware(mux)
@@ -436,7 +442,7 @@ func HandleDevicesRequest(w http.ResponseWriter, r *http.Request) {
 	for _, d := range devices {
 		infos = append(infos, DeviceInfo{
 			ID:     string(d.ID),
-			Name:   d.Name,
+			Name:   deviceDisplayName(d),
 			Type:   d.Type,
 			Active: d.Active,
 		})
@@ -482,5 +488,75 @@ func HandlePauseRequest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(APIResponse{
 		Success: true,
 		Message: result,
+	})
+}
+
+// askTimeout bounds one /api/v1/ask request. Claiming a speaker that
+// another account owns can take ~15s on its own.
+const askTimeout = 45 * time.Second
+
+// HandleAskRequest handles /api/v1/ask. It takes a spoken request as
+// `text` (query string, or a JSON body {"text": "...", "dry_run": true}),
+// works out what to do, does it, and returns a sentence to read back.
+// dry_run=true decides everything but changes nothing.
+func HandleAskRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+	if token != apiAccessToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(AskResponse{Message: "Invalid or missing access token", Error: "Invalid or missing access token"})
+		return
+	}
+
+	text := r.URL.Query().Get("text")
+	dryRun := strings.EqualFold(r.URL.Query().Get("dry_run"), "true")
+	if r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var body struct {
+			Text   string `json:"text"`
+			DryRun bool   `json:"dry_run"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(AskResponse{Message: "The request body isn't valid JSON.", Error: err.Error()})
+			return
+		}
+		if body.Text != "" {
+			text = body.Text
+		}
+		dryRun = dryRun || body.DryRun
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(AskResponse{Message: "I didn't hear a request.", Error: "text parameter is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), askTimeout)
+	defer cancel()
+
+	res, err := Ask(ctx, text, dryRun)
+	if err != nil {
+		log.Printf("ask: %q failed: %v", text, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AskResponse{
+			Message: "Sorry, something went wrong and I couldn't do that.",
+			Intent:  res.Intent,
+			DryRun:  dryRun,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(AskResponse{
+		ActionTaken: res.ActionTaken,
+		Message:     res.Message,
+		Intent:      res.Intent,
+		DryRun:      dryRun,
 	})
 }
