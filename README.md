@@ -241,7 +241,9 @@ To grant it:
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cloudmanic.spotify-shortcut.plist
    ```
 
-The permission persists per binary path. You only need to do this once unless the binary location changes.
+`scripts/deploy.sh` signs the binary with the Cloudmanic Developer ID (identifier `com.cloudmanic.spotify-shortcut`). macOS ties the permission to that signature, so it survives redeploys. An unsigned build gets a new signature every time and loses the permission.
+
+If the prompt doesn't appear, open **System Settings → Privacy & Security → Local Network** on the deploy machine and turn on `spotify-shortcut`.
 
 ## Development
 
