@@ -18,7 +18,9 @@
 #   - spicer logged in on stowe's screen. The service is a LaunchAgent, so
 #     it only runs while that user has a login session.
 #   - Working .env locally with SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
-#     API_ACCESS_TOKEN.
+#     API_ACCESS_TOKEN and TYPESAFE_API_KEY.
+#   - The Cloudmanic "Developer ID Application" certificate in the local
+#     keychain, for signing.
 #
 
 set -euo pipefail
@@ -33,6 +35,12 @@ REMOTE_DIR="${REMOTE_HOME}/spotify-shortcut"
 SERVICE_LABEL="com.cloudmanic.spotify-shortcut"
 PLIST_PATH="${REMOTE_HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 BINARY="spotify-shortcut"
+
+# macOS keys the Local Network permission to the binary's code signature.
+# Go's default ad-hoc signature changes on every build, so each deploy would
+# lose the grant; a Developer ID signature with a fixed identifier keeps it.
+SIGNING_IDENTITY="Developer ID Application: Cloudmanic Labs, LLC (AA76KHYRNV)"
+SIGNING_ID="com.cloudmanic.spotify-shortcut"
 
 # Resolve the project root regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +58,9 @@ fi
 
 echo "==> Building ${BINARY} for darwin/arm64..."
 GOOS=darwin GOARCH=arm64 go build -trimpath -o "${BINARY}" .
+
+echo "==> Signing ${BINARY} as ${SIGNING_ID}..."
+codesign --force --sign "${SIGNING_IDENTITY}" --identifier "${SIGNING_ID}" "${BINARY}"
 
 # --- Remote prep -------------------------------------------------------------
 
